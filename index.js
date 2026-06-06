@@ -1,9 +1,9 @@
 import { extension_settings, getContext, loadExtensionSettings } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
-// 扩展配置
-const extensionName = "extension";
-const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
+// 扩展配置：按实际安装文件夹自动识别，避免仓库名改了以后找不到 example.html
+const extensionFolderPath = new URL(".", import.meta.url).pathname.replace(/\/$/, "");
+const extensionName = decodeURIComponent(extensionFolderPath.split("/").pop() || "sillytavern-siliconflow-tts");
 
 // 全局状态管理
 const audioState = {

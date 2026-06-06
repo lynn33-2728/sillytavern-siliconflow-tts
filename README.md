@@ -34,15 +34,21 @@
 
 ## 安装
 
-把本仓库放到 SillyTavern 的第三方扩展目录：
+推荐在 SillyTavern 的扩展页面用仓库地址安装：
 
 ```text
-SillyTavern/public/scripts/extensions/third-party/extension
+https://github.com/lynn33-2728/sillytavern-siliconflow-tts
+```
+
+也可以手动把本仓库放到 SillyTavern 的第三方扩展目录：
+
+```text
+SillyTavern/data/default-user/extensions/sillytavern-siliconflow-tts
 ```
 
 然后刷新 SillyTavern 页面，在扩展设置里配置 SiliconFlow API。
 
-`index.js` 会加载 `example.html` 作为设置面板，本仓库已包含该文件。
+`index.js` 会按实际安装文件夹自动加载同目录下的 `example.html` 作为设置面板。
 
 ## 出处与许可
 

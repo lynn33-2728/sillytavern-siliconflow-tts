@@ -1,8 +1,11 @@
 {
-  "display_name": "SiliconFlow TTS Floating Progress",
-  "loading_order": 50,
+  "display_name": "硅基流动语音插件",
+  "loading_order": 1,
   "requires": [],
   "optional": [],
   "js": "index.js",
-  "css": ""
+  "css": "style.css",
+  "author": "沐风的狗子 / lynn33-2728",
+  "version": "1.0.1",
+  "homePage": "https://github.com/lynn33-2728/sillytavern-siliconflow-tts"
 }
