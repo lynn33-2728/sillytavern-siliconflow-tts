@@ -1,0 +1,155 @@
+<div class="siliconflow-extension-settings">
+    <!-- 语音功能（TTS）-->
+    <div class="inline-drawer">
+        <div class="inline-drawer-header inline-drawer-toggle">
+            <b>硅基语音功能（TTS）</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
+        </div>
+        <div class="inline-drawer-content" style="display: none;">
+            <div class="flex-container">
+                <!-- API设置（从原来的位置移过来）-->
+                <div class="setting-item">
+                    <label for="siliconflow_api_key">API密钥：</label>
+                    <input id="siliconflow_api_key" type="password" placeholder="输入你的硅基流动API密钥" />
+                    <small>从 <a href="https://siliconflow.cn" target="_blank">硅基流动官网</a> 获取API密钥</small>
+                </div>
+                
+                <div class="setting-item">
+                    <label for="siliconflow_api_url">API地址：</label>
+                    <input id="siliconflow_api_url" type="text" value="https://api.siliconflow.cn/v1" />
+                </div>
+                
+                <div class="setting-item button-group">
+                    <button id="test_siliconflow_connection" class="menu_button">测试连接</button>
+                    <button id="save_siliconflow_settings" class="menu_button">保存设置</button>
+                    <span id="connection_status" style="color: red;">未连接</span>
+                </div>
+                
+                <hr class="sysHR">
+                
+                <!-- 模型选择 -->
+                <div class="setting-item">
+                    <label for="tts_model">TTS模型：</label>
+                    <select id="tts_model">
+                        <option value="FunAudioLLM/CosyVoice2-0.5B">CosyVoice2-0.5B</option>
+                    </select>
+                </div>
+                
+                <!-- 音色选择 -->
+                <div class="setting-item">
+                    <label for="tts_voice">语音角色：</label>
+                    <select id="tts_voice">
+                        <option value="alex">Alex (男声)</option>
+                        <option value="anna">Anna (女声)</option>
+                        <option value="bella">Bella (女声)</option>
+                        <option value="benjamin">Benjamin (男声)</option>
+                        <option value="charles">Charles (男声)</option>
+                        <option value="claire">Claire (女声)</option>
+                        <option value="david">David (男声)</option>
+                        <option value="diana">Diana (女声)</option>
+                    </select>
+                </div>
+                
+                <!-- 语速调整 -->
+                <div class="setting-item">
+                    <label for="tts_speed">语速（0.25-4.0）：</label>
+                    <input type="range" id="tts_speed" min="0.25" max="4" step="0.25" value="1" />
+                    <span id="tts_speed_value">1.0</span>
+                </div>
+                
+                <!-- 音量增益 -->
+                <div class="setting-item">
+                    <label for="tts_gain">音量增益（-10到10）：</label>
+                    <input type="range" id="tts_gain" min="-10" max="10" step="1" value="0" />
+                    <span id="tts_gain_value">0</span>
+                </div>
+                
+                
+                <!-- 自动播放 -->
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="auto_play_audio" checked />
+                        自动朗读角色消息
+                    </label>
+                </div>
+                
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="auto_play_user" />
+                        自动朗读用户消息
+                    </label>
+                </div>
+                
+                <!-- 克隆音色功能 -->
+                <div class="sub-section">
+                    <h4>克隆音色功能</h4>
+                    <div class="setting-item">
+                        <label for="clone_voice_name">音色名称：</label>
+                        <input type="text" id="clone_voice_name" placeholder="例如: my_voice_1" pattern="[a-zA-Z0-9_\-]+" />
+                        <small>只能使用英文字母、数字、下划线和连字符，不超过64字符</small>
+                    </div>
+                    <div class="setting-item">
+                        <label for="clone_voice_text">参考文本：</label>
+                        <input type="text" id="clone_voice_text" placeholder="输入音频＊对应＊的文本内容" />
+                    </div>
+                    <div class="setting-item">
+                        <label for="clone_voice_audio">参考音频：</label>
+                        <input type="file" id="clone_voice_audio" accept="audio/*" />
+                        <small>支持mp3, wav等音频格式，建议5-10秒清晰语音</small>
+                    </div>
+                    <div class="setting-item">
+                        <button id="upload_voice" class="menu_button">上传克隆音色</button>
+                        <button id="refresh_custom_voices" class="menu_button">刷新音色列表</button>
+                    </div>
+                    <div class="setting-item">
+                        <label>已克隆的音色：</label>
+                        <div id="custom_voices_list" style="margin-top: 10px;">
+                            <small>暂无自定义音色</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr class="sysHR">
+                
+                <!-- 文本截取设置 -->
+                <div class="sub-section">
+                    <h4>文本截取设置</h4>
+                    <div class="setting-item">
+                        <label for="image_text_start">开始标记：</label>
+                        <input type="text" id="image_text_start" placeholder="留空=读全文；多个标记用空格隔开" value="" />
+                    </div>
+                    <div class="setting-item">
+                        <label for="image_text_end">结束标记：</label>
+                        <input type="text" id="image_text_end" placeholder="与开始标记一一对应" value="" />
+                        <small>
+                            <b>使用说明</b><br>
+                            1. 自动朗读角色消息：默认开启。角色新回复生成后，会自动合成并尝试播放语音。<br>
+                            2. 自动朗读用户消息：默认关闭。需要朗读自己的消息时再手动打开。<br>
+                            3. 开始/结束标记都留空 = 朗读整条消息；两个框都填引号 = 只朗读引号内对话。<br>
+                            4. 支持多组标记，用空格隔开，例如开始填 <code>（ 【 "</code>，结束填 <code>） 】 "</code>。<br>
+                            5. 提取不到标记内容时，会自动改读整条消息，不会卡住。<br>
+                            <br>
+                            <b style="color: #4dabf7;">🔊 语音进度条</b><br>
+                            &nbsp;&nbsp;&nbsp;• 顶部【🔊 语音进度条】开 = 常驻显示；关 = 平时隐藏，朗读时仍会自动弹出。<br>
+                            &nbsp;&nbsp;&nbsp;• 进度条上的 <b>⋮</b> 可以下载最近一次音频、查看 TTS 日志、重置位置和调播放速度。<br>
+                            &nbsp;&nbsp;&nbsp;• 按住左侧 <b>🔊</b> 可以拖动进度条位置。<br>
+                            &nbsp;&nbsp;&nbsp;• 手机浏览器可能会拦截自动播放：如果只生成了音频但没出声，先点页面一次，或点进度条上的 <b>▶</b> 播放。<br>
+                            &nbsp;&nbsp;&nbsp;• 部分手机端需要长按/拉拽“下载音频”后，系统才会刷新出语音进度条；平板可能要等缓存读取完，再点 <b>▶</b>。<br>
+                            &nbsp;&nbsp;&nbsp;• 每条消息名字旁边的 <b>▶</b> 可以单独朗读那一条，也会复用缓存，不重复扣费。
+                        </small>
+                    </div>
+                </div>
+                
+                <!-- TTS测试 -->
+                <div class="sub-section">
+                    <h4>TTS测试</h4>
+                    <div class="setting-item">
+                        <textarea id="tts_test_text" placeholder="输入测试文本...">你好，这是一个测试语音。</textarea>
+                        <button id="test_tts" class="menu_button">生成测试语音</button>
+                        <div id="tts_output"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

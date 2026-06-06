@@ -1,0 +1,8 @@
+{
+  "display_name": "SiliconFlow TTS Floating Progress",
+  "loading_order": 50,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": ""
+}

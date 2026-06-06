@@ -1,0 +1,1707 @@
+import { extension_settings, getContext, loadExtensionSettings } from "../../../extensions.js";
+import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
+
+// 扩展配置
+const extensionName = "extension";
+const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
+
+// 全局状态管理
+const audioState = {
+  isPlaying: false,
+  currentAudio: null,      // 当前播放的音频对象，用于随时停止
+  playingButton: null,     // 当前发亮的喇叭按钮
+  lastProcessedMessageId: null,
+  lastProcessedUserMessageId: null,
+  processingTimeout: null,
+  audioQueue: []
+};
+
+// TTS 音频缓存：同一段文字只生成一次，之后“再听一次”直接放缓存，不再请求 API（不扣费）
+const ttsAudioCache = new Map();
+
+// ===== 屏幕日志面板：每步都打出来，方便排查 =====
+function ttsLog(msg) {
+  const t = new Date().toLocaleTimeString();
+  const line = "[" + t + "] " + msg;
+  try { console.log("[TTS]", line); } catch (e) {}
+  let panel = document.getElementById("tts-log-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "tts-log-panel";
+    panel.style.cssText =
+      "position:fixed;left:6px;right:6px;bottom:120px;z-index:100000;max-height:32vh;overflow-y:auto;" +
+      "background:rgba(0,0,0,0.88);color:#00ff7f;font-size:11px;line-height:1.5;padding:0;border-radius:8px;" +
+      "font-family:monospace;white-space:pre-wrap;display:none;box-shadow:0 2px 12px rgba(0,0,0,0.6);";
+    const head = document.createElement("div");
+    head.style.cssText = "position:sticky;top:0;background:#111;color:#fff;padding:4px 8px;display:flex;justify-content:space-between;align-items:center;border-radius:8px 8px 0 0;";
+    const title = document.createElement("span");
+    title.textContent = "TTS 日志";
+    const btns = document.createElement("span");
+    const clr = document.createElement("span");
+    clr.textContent = "清空";
+    clr.style.cssText = "cursor:pointer;margin-right:14px;color:#ffd54a;";
+    clr.onclick = () => { const b = document.getElementById("tts-log-body"); if (b) b.innerHTML = ""; };
+    const cls = document.createElement("span");
+    cls.textContent = "✕";
+    cls.style.cssText = "cursor:pointer;color:#fff;";
+    cls.onclick = () => { panel.style.display = "none"; };
+    btns.appendChild(clr); btns.appendChild(cls);
+    head.appendChild(title); head.appendChild(btns);
+    const body = document.createElement("div");
+    body.id = "tts-log-body";
+    body.style.cssText = "padding:6px 8px;";
+    panel.appendChild(head);
+    panel.appendChild(body);
+    document.body.appendChild(panel);
+  }
+  // 不再自动弹出，只静默记录；用播放条上的「日志」按钮打开/收起
+  const body = document.getElementById("tts-log-body");
+  const div = document.createElement("div");
+  div.textContent = line;
+  body.appendChild(div);
+  while (body.childNodes.length > 60) body.removeChild(body.firstChild);
+  body.scrollTop = body.scrollHeight;
+}
+
+
+
+// 默认设置
+const defaultSettings = {
+  apiKey: "",
+  apiUrl: "https://api.siliconflow.cn/v1",
+  ttsModel: "FunAudioLLM/CosyVoice2-0.5B",
+  ttsVoice: "alex",
+  ttsSpeed: 1.0,
+  ttsGain: 0,
+  responseFormat: "mp3",
+  sampleRate: 32000,
+  imageModel: "",
+  imageSize: "512",
+  textStart: "（",
+  textEnd: "）",
+  generationFrequency: 5,
+  autoPlay: true,
+  autoPlayUser: false,
+  barPersistent: true,
+  ttsPlaybackRate: 1.0,
+  customVoices: [] // 存储自定义音色列表
+};
+
+// TTS模型和音色配置
+const TTS_MODELS = {
+  "FunAudioLLM/CosyVoice2-0.5B": {
+    name: "CosyVoice2-0.5B",
+    voices: {
+      "alex": "Alex (男声)",
+      "anna": "Anna (女声)",
+      "bella": "Bella (女声)",
+      "benjamin": "Benjamin (男声)",
+      "charles": "Charles (男声)",
+      "claire": "Claire (女声)",
+      "david": "David (男声)",
+      "diana": "Diana (女声)"
+    }
+  }
+};
+
+// 加载设置
+async function loadSettings() {
+  extension_settings[extensionName] = extension_settings[extensionName] || {};
+  
+  if (Object.keys(extension_settings[extensionName]).length === 0) {
+    Object.assign(extension_settings[extensionName], defaultSettings);
+  }
+
+  // 更新UI
+  $("#siliconflow_api_key").val(extension_settings[extensionName].apiKey || "");
+  $("#siliconflow_api_url").val(extension_settings[extensionName].apiUrl || defaultSettings.apiUrl);
+  $("#tts_model").val(extension_settings[extensionName].ttsModel || defaultSettings.ttsModel);
+  $("#tts_voice").val(extension_settings[extensionName].ttsVoice || defaultSettings.ttsVoice);
+  $("#tts_speed").val(extension_settings[extensionName].ttsSpeed || defaultSettings.ttsSpeed);
+  $("#tts_speed_value").text(extension_settings[extensionName].ttsSpeed || defaultSettings.ttsSpeed);
+  $("#tts_gain").val(extension_settings[extensionName].ttsGain || defaultSettings.ttsGain);
+  $("#tts_gain_value").text(extension_settings[extensionName].ttsGain || defaultSettings.ttsGain);
+  $("#response_format").val(extension_settings[extensionName].responseFormat || defaultSettings.responseFormat);
+  $("#sample_rate").val(extension_settings[extensionName].sampleRate || defaultSettings.sampleRate);
+  $("#image_size").val(extension_settings[extensionName].imageSize || defaultSettings.imageSize);
+  $("#image_text_start").val(extension_settings[extensionName].textStart || defaultSettings.textStart);
+  $("#image_text_end").val(extension_settings[extensionName].textEnd || defaultSettings.textEnd);
+  $("#generation_frequency").val(extension_settings[extensionName].generationFrequency || defaultSettings.generationFrequency);
+  $("#auto_play_audio").prop("checked", extension_settings[extensionName].autoPlay !== false);
+  $("#auto_play_user").prop("checked", extension_settings[extensionName].autoPlayUser === true);
+  
+  updateVoiceOptions();
+}
+
+// 更新音色选项
+function updateVoiceOptions() {
+  const model = $("#tts_model").val();
+  const voiceSelect = $("#tts_voice");
+  const currentValue = voiceSelect.val();
+  voiceSelect.empty();
+  
+  // 添加预设音色
+  if (TTS_MODELS[model] && TTS_MODELS[model].voices) {
+    voiceSelect.append('<optgroup label="预设音色">');
+    Object.entries(TTS_MODELS[model].voices).forEach(([value, name]) => {
+      voiceSelect.append(`<option value="${value}">${name}</option>`);
+    });
+    voiceSelect.append('</optgroup>');
+  }
+  
+  // 添加自定义音色
+  const customVoices = extension_settings[extensionName].customVoices || [];
+  console.log(`更新音色选项，自定义音色数量: ${customVoices.length}`);
+  
+  if (customVoices.length > 0) {
+    voiceSelect.append('<optgroup label="自定义音色">');
+    customVoices.forEach(voice => {
+      // 尝试不同的字段名称
+      const voiceName = voice.name || voice.customName || voice.custom_name || "未命名";
+      const voiceUri = voice.uri || voice.id || voice.voice_id;
+      console.log(`添加自定义音色: ${voiceName} -> ${voiceUri}`);
+      voiceSelect.append(`<option value="${voiceUri}">${voiceName} (自定义)</option>`);
+    });
+    voiceSelect.append('</optgroup>');
+  }
+  
+  // 恢复之前的选择或设置默认值
+  if (currentValue && voiceSelect.find(`option[value="${currentValue}"]`).length > 0) {
+    voiceSelect.val(currentValue);
+  } else {
+    voiceSelect.val(extension_settings[extensionName].ttsVoice || Object.keys(TTS_MODELS[model]?.voices || {})[0]);
+  }
+}
+
+// 保存设置
+function saveSettings() {
+  extension_settings[extensionName].apiKey = $("#siliconflow_api_key").val();
+  extension_settings[extensionName].apiUrl = $("#siliconflow_api_url").val();
+  extension_settings[extensionName].ttsModel = $("#tts_model").val();
+  extension_settings[extensionName].ttsVoice = $("#tts_voice").val();
+  extension_settings[extensionName].ttsSpeed = parseFloat($("#tts_speed").val());
+  extension_settings[extensionName].ttsGain = parseFloat($("#tts_gain").val());
+  extension_settings[extensionName].responseFormat = $("#response_format").val();
+  extension_settings[extensionName].sampleRate = parseInt($("#sample_rate").val());
+  extension_settings[extensionName].imageSize = $("#image_size").val();
+  extension_settings[extensionName].textStart = $("#image_text_start").val();
+  extension_settings[extensionName].textEnd = $("#image_text_end").val();
+  extension_settings[extensionName].generationFrequency = parseInt($("#generation_frequency").val());
+  extension_settings[extensionName].autoPlay = $("#auto_play_audio").prop("checked");
+  extension_settings[extensionName].autoPlayUser = $("#auto_play_user").prop("checked");
+  
+  saveSettingsDebounced();
+  // 移除弹窗提示，改为控制台日志
+  console.log("设置已保存");
+}
+
+// 测试连接
+async function testConnection() {
+  const apiKey = $("#siliconflow_api_key").val();
+  
+  if (!apiKey) {
+    toastr.error("请先输入API密钥", "连接失败");
+    return;
+  }
+  
+  try {
+    // 获取音色列表作为连接测试
+    const response = await fetch(`${extension_settings[extensionName].apiUrl}/audio/voice/list`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (response.ok) {
+      // 只更新状态，不显示弹窗
+      $("#connection_status").text("已连接").css("color", "green");
+      console.log("API连接成功");
+    } else {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  } catch (error) {
+    toastr.error(`连接失败: ${error.message}`, "硅基流动插件");
+    $("#connection_status").text("未连接").css("color", "red");
+  }
+}
+
+// TTS功能
+async function generateTTS(text, buttonElement = null) {
+  const apiKey = extension_settings[extensionName].apiKey;
+  
+  if (!apiKey) {
+    ttsLog("❌ 没有配置 API 密钥");
+    toastr.error("请先配置API密钥", "TTS错误");
+    return;
+  }
+  
+  if (!text) {
+    ttsLog("❌ 文本为空，不请求");
+    toastr.error("文本不能为空", "TTS错误");
+    return;
+  }
+
+  ttsLog("① 进入生成，文本长度 " + text.length + "：「" + text.substring(0, 30) + "」");
+
+  // 先熄灭其它按钮，再把当前按钮立刻点亮成“生成中（黄）”——任何一次点击都能马上看到反馈
+  $(".tts-manual-play-btn").removeClass("tts-loading tts-playing");
+  if (buttonElement && buttonElement.length > 0) {
+    audioState.playingButton = buttonElement;
+    setButtonState(buttonElement, "loading");
+  }
+
+  // 命中缓存：直接播放，不再请求 API（不扣费）
+  if (ttsAudioCache.has(text)) {
+    ttsLog("② 命中缓存，直接播放（不扣费）");
+    playAudioUrl(ttsAudioCache.get(text), buttonElement);
+    return ttsAudioCache.get(text);
+  }
+  
+  try {
+    console.log("正在生成语音...");
+
+    // 安全上限：硅基流动单次合成有长度限制，过长会卡住或失败，这里截断保护
+    const MAX_LEN = 1000;
+    if (text.length > MAX_LEN) {
+      console.warn(`文本过长(${text.length})，已截断到 ${MAX_LEN} 字`);
+      text = text.substring(0, MAX_LEN);
+      toastr.info(`文本较长，已截断到 ${MAX_LEN} 字朗读`, "TTS");
+    }
+
+    const voiceValue = $("#tts_voice").val() || "alex";
+    const speed = parseFloat($("#tts_speed").val()) || 1.0;
+    const gain = parseFloat($("#tts_gain").val()) || 0;
+    
+    let voiceParam;
+    if (voiceValue.startsWith("speech:")) {
+      voiceParam = voiceValue;
+    } else {
+      voiceParam = `FunAudioLLM/CosyVoice2-0.5B:${voiceValue}`;
+    }
+    
+    const requestBody = {
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      input: text,
+      voice: voiceParam,
+      response_format: "mp3",
+      speed: speed,
+      gain: gain
+    };
+    ttsLog("③ 请求 API 中… 音色=" + voiceParam);
+
+    // 45 秒超时，避免无限卡在“生成中”
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+    let response;
+    try {
+      response = await fetch(`${extension_settings[extensionName].apiUrl}/audio/speech`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        throw new Error('请求超时（45秒）。可能文本太长或网络问题，换短一点的内容试试。');
+      }
+      throw e;
+    }
+    clearTimeout(timeoutId);
+
+    ttsLog("④ API 返回 HTTP " + response.status);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      ttsLog("❌ API 报错：" + errText.substring(0, 120));
+      throw new Error(`HTTP ${response.status}: ${errText}`);
+    }
+    
+    const audioBlob = await response.blob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    ttsLog("⑤ 拿到音频 " + (audioBlob.size / 1024).toFixed(1) + " KB");
+
+    // 存入缓存，下次同一段文字直接放，不再扣费
+    ttsAudioCache.set(text, audioUrl);
+
+    playAudioUrl(audioUrl, buttonElement);
+
+    const fmt = extension_settings[extensionName].responseFormat || "mp3";
+    const downloadLink = $(`<a href="${audioUrl}" download="tts_output.${fmt}">下载音频</a>`);
+    $("#tts_output").empty().append(downloadLink);
+    
+    console.log("语音生成成功！");
+    return audioUrl;
+  } catch (error) {
+    resetPlayState();
+    ttsLog("❌ 出错：" + (error && error.message ? error.message : error));
+    console.error("TTS Error:", error);
+    toastr.error(`语音生成失败: ${error.message}`, "TTS错误");
+  }
+}
+
+// 实际播放一个音频URL（缓存和新生成共用）
+// ===== 移动端音频解锁 + 底部“一定能出声”播放条 =====
+let ttsAudioEl = null;
+let audioPrimed = false;
+let silentAudioUrl = null;
+let lastTtsAudioUrl = "";
+let lastTtsDownloadName = "tts_output.mp3";
+let playerBarDragged = false;
+
+function shouldKeepPlayerBarVisible() {
+  return extension_settings[extensionName]?.barPersistent !== false;
+}
+
+function getSilentAudioUrl() {
+  if (!silentAudioUrl) silentAudioUrl = makeSilentWavUrl();
+  return silentAudioUrl;
+}
+
+function formatTtsTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "--:--";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function updateFloatingPlayerUI() {
+  const audio = ttsAudioEl;
+  const playBtn = document.getElementById("tts-player-play");
+  const timeText = document.getElementById("tts-player-time");
+  const fill = document.getElementById("tts-player-progress-fill");
+  if (!audio) return;
+
+  const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+  const current = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+  const percent = duration > 0 ? Math.max(0, Math.min(100, (current / duration) * 100)) : 0;
+
+  if (playBtn) playBtn.textContent = audio.paused ? "▶" : "❚❚";
+  if (timeText) timeText.textContent = `${formatTtsTime(current)} / ${formatTtsTime(duration)}`;
+  if (fill) fill.style.width = `${percent}%`;
+}
+
+function setTtsPlaybackRate(rate) {
+  const safeRate = Number(rate) || 1;
+  extension_settings[extensionName].ttsPlaybackRate = safeRate;
+  saveSettingsDebounced();
+  if (ttsAudioEl) ttsAudioEl.playbackRate = safeRate;
+  document.querySelectorAll(".tts-speed-item").forEach((item) => {
+    item.style.color = Number(item.dataset.rate) === safeRate ? "#ffd54a" : "#fff";
+  });
+}
+
+function downloadLastTtsAudio() {
+  if (!lastTtsAudioUrl) {
+    toastr.info("还没有可下载的语音，先生成或播放一次。", "TTS");
+    return;
+  }
+  const link = document.createElement("a");
+  link.href = lastTtsAudioUrl;
+  link.download = lastTtsDownloadName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function forceShowPlayerBarElement(bar) {
+  if (!bar) return;
+  applyResponsivePlayerBarLayout(bar);
+  bar.style.setProperty("display", "flex", "important");
+  bar.style.setProperty("visibility", "visible", "important");
+  bar.style.setProperty("opacity", "1", "important");
+  bar.style.setProperty("pointer-events", "auto", "important");
+}
+
+function forceHidePlayerBarElement(bar) {
+  if (!bar) return;
+  bar.style.setProperty("display", "none", "important");
+}
+
+function applyResponsivePlayerBarLayout(bar) {
+  if (!bar) return;
+
+  const compact = window.innerWidth <= 720;
+  const progress = document.getElementById("tts-player-progress");
+  const timeText = document.getElementById("tts-player-time");
+  if (!playerBarDragged) {
+    bar.style.top = "auto";
+    bar.style.left = "20px";
+    bar.style.right = "auto";
+    bar.style.bottom = "calc(92px + env(safe-area-inset-bottom, 0px))";
+    bar.style.transform = "none";
+    bar.style.width = "auto";
+    bar.style.maxWidth = "calc(100vw - 40px)";
+    bar.style.boxSizing = "border-box";
+    bar.style.justifyContent = "flex-start";
+    bar.style.gap = compact ? "6px" : "8px";
+    bar.style.padding = compact ? "6px 8px" : "6px 10px";
+    if (progress) {
+      progress.style.width = compact ? "auto" : "150px";
+      progress.style.maxWidth = compact ? "none" : "30vw";
+      progress.style.flex = compact ? "1 1 48px" : "1 1 110px";
+    }
+    if (timeText) {
+      timeText.style.minWidth = compact ? "62px" : "76px";
+      timeText.style.fontSize = compact ? "12px" : "13px";
+    }
+    return;
+  }
+
+  const rect = bar.getBoundingClientRect();
+  let x = rect.left;
+  let y = rect.top;
+  x = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  y = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  bar.style.left = `${x}px`;
+  bar.style.top = `${y}px`;
+  bar.style.right = "auto";
+  bar.style.bottom = "auto";
+  bar.style.transform = "none";
+}
+
+function getTtsAudioEl() {
+  if (!ttsAudioEl) {
+    // 底部播放条容器
+    const bar = document.createElement("div");
+    bar.id = "tts-player-bar";
+    bar.style.cssText =
+      "position:fixed;left:50%;transform:translateX(-50%);bottom:90px;z-index:99999;" +
+      "display:none;align-items:center;gap:8px;padding:6px 10px;border-radius:12px;" +
+      "background:rgba(0,0,0,0.8);box-shadow:0 2px 10px rgba(0,0,0,0.5);max-width:92vw;" +
+      "box-sizing:border-box;";
+
+    const label = document.createElement("span");
+    label.textContent = "🔊";
+    label.title = "按住拖动";
+    label.style.cssText = "font-size:16px;line-height:1;flex:0 0 auto;cursor:move;touch-action:none;padding:0 2px;";
+
+    // 按住 🔊 可把整条播放条拖到屏幕任意位置（悬浮，不挡视线）
+    let drag = null;
+    label.addEventListener("pointerdown", (e) => {
+      const rect = bar.getBoundingClientRect();
+      drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+      playerBarDragged = true;
+      bar.style.transform = "none";
+      bar.style.left = rect.left + "px";
+      bar.style.top = rect.top + "px";
+      bar.style.bottom = "auto";
+      bar.style.right = "auto";
+      bar.style.width = bar.offsetWidth + "px";
+      try { label.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    label.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      let x = e.clientX - drag.dx;
+      let y = e.clientY - drag.dy;
+      x = Math.max(0, Math.min(x, window.innerWidth - bar.offsetWidth));
+      y = Math.max(0, Math.min(y, window.innerHeight - bar.offsetHeight));
+      bar.style.left = x + "px";
+      bar.style.top = y + "px";
+    });
+    const endDrag = () => { drag = null; };
+    label.addEventListener("pointerup", endDrag);
+    label.addEventListener("pointercancel", endDrag);
+
+    ttsAudioEl = document.createElement("audio");
+    ttsAudioEl.id = "tts-native-player";
+    ttsAudioEl.removeAttribute("controls");
+    ttsAudioEl.setAttribute("playsinline", "");
+    ttsAudioEl.setAttribute("webkit-playsinline", "");
+    ttsAudioEl.preload = "metadata";
+    ttsAudioEl.style.cssText = "display:none;width:0;height:0;";
+    ttsAudioEl.src = getSilentAudioUrl();
+    ttsAudioEl.playbackRate = extension_settings[extensionName].ttsPlaybackRate || 1;
+
+    const playBtn = document.createElement("button");
+    playBtn.id = "tts-player-play";
+    playBtn.type = "button";
+    playBtn.textContent = "▶";
+    playBtn.title = "播放/暂停";
+    playBtn.style.cssText =
+      "width:36px;height:34px;border:0;border-radius:17px;background:#fff;color:#000;" +
+      "font-size:16px;line-height:34px;padding:0;cursor:pointer;flex:0 0 auto;";
+    playBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const audio = getTtsAudioEl();
+      if (audio.paused) {
+        try {
+          await audio.play();
+        } catch (err) {
+          toastr.info("还没有可播放的语音，先点消息旁边的播放三角形生成一次。", "TTS");
+        }
+      } else {
+        audio.pause();
+      }
+      updateFloatingPlayerUI();
+    });
+
+    const timeText = document.createElement("span");
+    timeText.id = "tts-player-time";
+    timeText.textContent = "0:00 / --:--";
+    timeText.style.cssText = "color:#fff;font-size:13px;white-space:nowrap;min-width:76px;text-align:center;flex:0 0 auto;";
+
+    const progress = document.createElement("div");
+    progress.id = "tts-player-progress";
+    progress.title = "点击跳转进度";
+    progress.style.cssText =
+      "width:150px;max-width:30vw;height:6px;border-radius:999px;background:rgba(255,255,255,0.35);" +
+      "overflow:hidden;cursor:pointer;flex:1 1 110px;";
+    const progressFill = document.createElement("div");
+    progressFill.id = "tts-player-progress-fill";
+    progressFill.style.cssText = "height:100%;width:0%;background:#fff;border-radius:999px;";
+    progress.appendChild(progressFill);
+    progress.addEventListener("click", (e) => {
+      const audio = getTtsAudioEl();
+      if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+      const rect = progress.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      audio.currentTime = ratio * audio.duration;
+      updateFloatingPlayerUI();
+    });
+
+    ["loadedmetadata", "durationchange", "timeupdate", "play", "playing", "pause", "ended", "emptied"].forEach((eventName) => {
+      ttsAudioEl.addEventListener(eventName, updateFloatingPlayerUI);
+    });
+
+    // 我自己的「⋮」菜单按钮，点开里面有「TTS日志」
+    const menuBtn = document.createElement("span");
+    menuBtn.textContent = "⋮";
+    menuBtn.title = "更多";
+    menuBtn.style.cssText = "color:#fff;cursor:pointer;padding:0 8px;font-size:22px;font-weight:bold;line-height:1;flex:0 0 auto;";
+
+    const versionTag = document.createElement("span");
+    versionTag.textContent = "v3L";
+    versionTag.title = "悬浮进度条版本";
+    versionTag.style.cssText = "color:rgba(255,255,255,0.45);font-size:10px;line-height:1;flex:0 0 auto;";
+
+    const menu = document.createElement("div");
+    menu.id = "tts-bar-menu";
+    menu.style.cssText = "position:absolute;bottom:110%;right:6px;background:#222;border:1px solid #555;border-radius:8px;padding:6px 0;display:none;min-width:150px;box-shadow:0 2px 12px rgba(0,0,0,0.7);z-index:100001;";
+    const makeMenuItem = (text, onClick, className = "") => {
+      const item = document.createElement("div");
+      item.textContent = text;
+      if (className) item.className = className;
+      item.style.cssText = "color:#fff;padding:9px 14px;cursor:pointer;font-size:14px;white-space:nowrap;";
+      item.addEventListener("mouseenter", () => { item.style.background = "rgba(255,255,255,0.12)"; });
+      item.addEventListener("mouseleave", () => { item.style.background = "transparent"; });
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onClick();
+      });
+      return item;
+    };
+    const logItem = document.createElement("div");
+    logItem.textContent = "TTS日志";
+    logItem.style.cssText = "color:#00ff7f;padding:10px 16px;cursor:pointer;font-size:14px;white-space:nowrap;";
+    logItem.addEventListener("click", () => {
+      ttsLog("（打开日志）"); // 确保面板已创建
+      const panel = document.getElementById("tts-log-panel");
+      if (panel) {
+        const hidden = (panel.style.display === "none" || !panel.style.display);
+        panel.style.display = hidden ? "block" : "none";
+      }
+      menu.style.display = "none";
+    });
+    menu.appendChild(logItem);
+
+    const downloadItem = makeMenuItem("下载音频", () => {
+      downloadLastTtsAudio();
+      menu.style.display = "none";
+    });
+    menu.appendChild(downloadItem);
+
+    const resetPositionItem = makeMenuItem("重置位置", () => {
+      playerBarDragged = false;
+      applyResponsivePlayerBarLayout(bar);
+      menu.style.display = "none";
+    });
+    menu.appendChild(resetPositionItem);
+
+    const speedTitle = document.createElement("div");
+    speedTitle.textContent = "播放速度";
+    speedTitle.style.cssText = "color:#aaa;padding:8px 14px 4px;font-size:12px;white-space:nowrap;border-top:1px solid rgba(255,255,255,0.14);margin-top:4px;";
+    menu.appendChild(speedTitle);
+
+    [0.75, 1, 1.25, 1.5, 2].forEach((rate) => {
+      const item = makeMenuItem(`${rate}x`, () => {
+        setTtsPlaybackRate(rate);
+        menu.style.display = "none";
+      }, "tts-speed-item");
+      item.dataset.rate = String(rate);
+      menu.appendChild(item);
+    });
+    setTtsPlaybackRate(extension_settings[extensionName].ttsPlaybackRate || 1);
+
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      menu.style.display = (menu.style.display === "none") ? "block" : "none";
+    });
+    // 点别处收起菜单
+    document.addEventListener("click", (e) => {
+      if (menu.style.display === "block" && e.target !== menuBtn && !menu.contains(e.target)) {
+        menu.style.display = "none";
+      }
+    });
+    window.addEventListener("resize", () => applyResponsivePlayerBarLayout(bar));
+    window.addEventListener("orientationchange", () => setTimeout(() => applyResponsivePlayerBarLayout(bar), 250));
+
+    const closeBtn = document.createElement("span");
+    closeBtn.textContent = "✕";
+    closeBtn.style.cssText = "color:#fff;cursor:pointer;padding:0 4px;font-size:16px;flex:0 0 auto;";
+    closeBtn.addEventListener("click", () => {
+      try { ttsAudioEl.pause(); } catch (e) {}
+      resetPlayState();
+      setPersistentPlayerBarEnabled(false);
+    });
+
+    bar.appendChild(label);
+    bar.appendChild(playBtn);
+    bar.appendChild(timeText);
+    bar.appendChild(progress);
+    bar.appendChild(ttsAudioEl);
+    bar.appendChild(versionTag);
+    bar.appendChild(menuBtn);
+    bar.appendChild(menu);
+    bar.appendChild(closeBtn);
+    document.body.appendChild(bar);
+    updateFloatingPlayerUI();
+  }
+  return ttsAudioEl;
+}
+
+let barClosedByUser = false;
+function showPlayerBar() {
+  const el = getTtsAudioEl();
+  const bar = document.getElementById("tts-player-bar");
+  if (bar) {
+    barClosedByUser = false; // 主动调用显示时，取消“已关闭”状态
+    forceShowPlayerBarElement(bar);
+    updateFloatingPlayerUI();
+  }
+  return el;
+}
+
+function ensurePersistentPlayerBar() {
+  if (!shouldKeepPlayerBarVisible()) return;
+  const el = getTtsAudioEl();
+  if (el && !el.getAttribute("src") && !el.src) {
+    el.src = getSilentAudioUrl();
+  }
+  const bar = document.getElementById("tts-player-bar");
+  if (bar) {
+    barClosedByUser = false;
+    forceShowPlayerBarElement(bar);
+    updateFloatingPlayerUI();
+  }
+}
+
+// 在设置面板里加「语音进度条 开/关」滑动开关
+function setBarToggleUI(on) {
+  const track = document.getElementById("tts-bar-toggle");
+  const knob = document.getElementById("tts-bar-knob");
+  const state = document.getElementById("tts-bar-toggle-state");
+  if (!track) return;
+  track.style.background = on ? "#3ba55d" : "#777";
+  if (knob) knob.style.left = on ? "22px" : "2px";
+  if (state) state.textContent = on ? "开" : "关";
+}
+
+function setPersistentPlayerBarEnabled(on) {
+  extension_settings[extensionName].barPersistent = !!on;
+  saveSettingsDebounced();
+  setBarToggleUI(!!on);
+
+  const bar = document.getElementById("tts-player-bar");
+  if (on) {
+    barClosedByUser = false;
+    ensurePersistentPlayerBar();
+  } else {
+    barClosedByUser = true;
+    forceHidePlayerBarElement(bar);
+  }
+}
+
+function createBarToggle() {
+  if (document.getElementById("tts-bar-toggle")) return;
+  const on = shouldKeepPlayerBarVisible(); // 默认开
+  const section = $(
+    '<div class="sub-section" style="flex-basis:100%;width:100%;margin-top:10px;">' +
+    '<div style="display:flex;align-items:center;gap:12px;">' +
+    '<b>🔊 语音进度条</b>' +
+    '<span id="tts-bar-toggle" style="position:relative;display:inline-block;width:44px;height:24px;border-radius:12px;background:#777;cursor:pointer;transition:background .2s;flex:0 0 auto;">' +
+    '<span id="tts-bar-knob" style="position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,0.4);"></span>' +
+    '</span>' +
+    '<span id="tts-bar-toggle-state" style="opacity:0.85;"></span>' +
+    '</div>' +
+    '<div style="font-size:12px;opacity:0.7;margin-top:4px;">开：进度条常驻显示；关：平时隐藏（朗读时仍会自动弹出，方便点播放）。</div>' +
+    '</div>'
+  );
+  // 放在「文本截取设置 / TTS测试」这一块前面，醒目
+  const flexC = $(".siliconflow-extension-settings .inline-drawer-content .flex-container").first();
+  if (flexC.length > 0) flexC.prepend(section);
+  else $("#extensions_settings").append(section);
+
+  setBarToggleUI(on);
+  let lastToggleAt = 0;
+  $("#tts-bar-toggle").on("pointerup touchend click", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const now = Date.now();
+    if (now - lastToggleAt < 350) return;
+    lastToggleAt = now;
+    setPersistentPlayerBarEnabled(!shouldKeepPlayerBarVisible());
+  });
+}
+
+// 生成一段极短的静音 WAV，用于在用户手势内“解锁”音频元素
+function makeSilentWavUrl() {
+  const sampleRate = 8000, numSamples = 400; // 0.05s
+  const buffer = new ArrayBuffer(44 + numSamples);
+  const view = new DataView(buffer);
+  const writeStr = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  writeStr(0, "RIFF"); view.setUint32(4, 36 + numSamples, true); writeStr(8, "WAVE");
+  writeStr(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true); view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+  writeStr(36, "data"); view.setUint32(40, numSamples, true);
+  for (let i = 0; i < numSamples; i++) view.setUint8(44 + i, 128);
+  return URL.createObjectURL(new Blob([view], { type: "audio/wav" }));
+}
+
+// 用户手势内调用一次即可解锁移动端音频（播放条保持隐藏）
+function primeAudioOnce() {
+  if (audioPrimed) return;
+  const el = getTtsAudioEl();
+  try {
+    el.src = getSilentAudioUrl();
+    const p = el.play();
+    if (p && p.then) {
+      p.then(() => { audioPrimed = true; }).catch(() => {});
+    } else {
+      audioPrimed = true;
+    }
+  } catch (e) {}
+}
+
+// 实际播放一个音频URL：显示底部播放条 + 尝试自动播放；被拦时用户点原生键必响
+function playAudioUrl(audioUrl, buttonElement) {
+  ttsLog("⑥ 显示播放条并尝试播放");
+  const audio = showPlayerBar();
+  try { audio.pause(); } catch (e) {}
+
+  lastTtsAudioUrl = audioUrl;
+  lastTtsDownloadName = `tts_output.${extension_settings[extensionName].responseFormat || "mp3"}`;
+  audio.volume = 1.0;
+  audio.playbackRate = extension_settings[extensionName].ttsPlaybackRate || 1;
+  audioState.currentAudio = audio;
+  audioState.isPlaying = true;
+
+  const btn = buttonElement && buttonElement.length > 0 ? buttonElement : audioState.playingButton;
+  if (btn && btn.length > 0) {
+    audioState.playingButton = btn;
+    setButtonState(btn, "loading"); // 出声前保持黄
+  }
+
+  audio.onplaying = () => {
+    if (audioState.playingButton) setButtonState(audioState.playingButton, "playing"); // 出声转绿
+  };
+  audio.onended = () => {
+    console.log('音频播放完成');
+    resetPlayState();
+  };
+  audio.onerror = () => {
+    ttsLog("❌ 音频元素报错（解码失败？）");
+    resetPlayState();
+    toastr.error('音频解码/播放失败，可能返回的不是有效音频。', 'TTS');
+  };
+
+  audio.src = audioUrl;
+  audio.load();
+  updateFloatingPlayerUI();
+  audio.play().then(() => {
+    ttsLog("✅ 自动播放成功，应该有声音了");
+    if (audioState.playingButton) setButtonState(audioState.playingButton, "playing");
+  }).catch(err => {
+    ttsLog("⚠️ 自动播放被拦，请点底部播放条的 ▶。原因：" + (err && err.message ? err.message : err));
+    if (audioState.playingButton) setButtonState(audioState.playingButton, "playing");
+    toastr.info('点击下方播放条的 ▶ 即可收听', 'TTS', { timeOut: 4000 });
+  });
+}
+
+// ============ 喇叭按钮辅助函数（新增） ============
+
+// 把所有按钮恢复到待机，并清空播放状态
+function resetPlayState() {
+  audioState.isPlaying = false;
+  audioState.currentAudio = null;
+  $(".tts-manual-play-btn").removeClass("tts-loading tts-playing");
+  audioState.playingButton = null;
+}
+
+// 三种外观：idle 待机 / loading 加载中 / playing 播放中
+// 注入一次性的高优先级样式（带 !important，确保一定可见）
+function injectTTSStyle() {
+  if (document.getElementById("tts-btn-style")) return;
+  const style = document.createElement("style");
+  style.id = "tts-btn-style";
+  style.textContent = `
+    @keyframes ttsGlowPulse {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.3); }
+    }
+    .tts-manual-play-btn {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.6em;
+      height: 1.6em;
+      margin: 0 6px;
+      font-size: 1.5em;
+      font-weight: bold;
+      line-height: 1;
+      cursor: pointer;
+      vertical-align: middle;
+      user-select: none;
+      color: #9aa0a6;
+      position: relative;
+      z-index: 60;
+      pointer-events: auto !important;
+      padding: 0 4px;
+      transition: color 0.15s, text-shadow 0.15s, transform 0.15s;
+    }
+    .tts-manual-play-btn:hover { color: #e0e0e0; }
+    /* 生成中：荧光黄，符号本身发光 + 跳动 */
+    .tts-manual-play-btn.tts-loading {
+      color: #f6ff00 !important;
+      text-shadow: 0 0 6px #f6ff00, 0 0 14px #f6ff00, 0 0 2px #ffffff;
+      animation: ttsGlowPulse 0.8s infinite;
+    }
+    /* 播放中：荧光青绿，符号发光 + 放大 */
+    .tts-manual-play-btn.tts-playing {
+      color: #00ffae !important;
+      text-shadow: 0 0 6px #00ffae, 0 0 16px #00ffae, 0 0 2px #ffffff;
+      transform: scale(1.2);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// 切换状态：idle 待机 / loading 生成中(黄,跳动) / playing 播放中(蓝)。只换颜色，emoji 始终是 🔊
+function setButtonState(button, state) {
+  if (!button || button.length === 0) return;
+  button.removeClass("tts-loading tts-playing");
+  if (state === "loading") {
+    button.addClass("tts-loading");
+  } else if (state === "playing") {
+    button.addClass("tts-playing");
+  }
+}
+
+// 给每条消息注入“朗读/停止”按钮（点击逻辑用事件委托，见 bindPlayButtonDelegation）
+function injectPlayButton() {
+  $(".mes").each(function () {
+    const messageElement = $(this);
+    if (messageElement.find(".tts-manual-play-btn").length > 0) return;
+
+    const playBtn = $('<span class="tts-manual-play-btn" title="朗读 / 停止" role="button">▶</span>');
+
+    // 放到角色名字「右边」：避开左侧的翻页箭头，避免被它盖住点不到
+    const nameText = messageElement.find(".name_text").first();
+    if (nameText.length > 0) {
+      nameText.after(playBtn);
+    } else {
+      let target = messageElement.find(".ch_name").first();
+      if (target.length === 0) target = messageElement.find(".mes_block").first();
+      if (target.length === 0) target = messageElement;
+      target.append(playBtn);
+    }
+  });
+}
+
+// 事件委托：只绑定一次，消息怎么重绘都能接住点击
+let playDelegationBound = false;
+function bindPlayButtonDelegation() {
+  if (playDelegationBound) return;
+  playDelegationBound = true;
+
+  $(document).on("click", ".tts-manual-play-btn", async function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const playBtn = $(this);
+    const messageElement = playBtn.closest(".mes");
+    try {
+      ttsLog("👆 点击 ▶");
+      primeAudioOnce();
+
+      // 再点正在播放的按钮 = 停止
+      if (audioState.playingButton && audioState.playingButton[0] === playBtn[0]) {
+        ttsLog("⏹ 再次点击 → 停止");
+        if (audioState.currentAudio) audioState.currentAudio.pause();
+        resetPlayState();
+        return;
+      }
+
+      let messageText = messageElement.find(".mes_text").text().trim();
+      if (!messageText) {
+        messageText = messageElement.find(".mes_reasoning_content, .mes_reasoning, .mes_block").text().trim();
+      }
+      if (!messageText) {
+        ttsLog("❌ 这条消息读不到文字（空/折叠块）");
+        toastr.warning("这条消息没有可朗读的文字，换一条角色回复试试。", "TTS");
+        return;
+      }
+      ttsLog("原文长度 " + messageText.length);
+
+      let textToRead = extractMarkedText(messageText);
+      if (textToRead) {
+        ttsLog("✂ 按标记截取到 " + textToRead.length + " 字");
+      } else {
+        ttsLog("⚠ 未截取到标记内文字 → 读全文（可能很长）");
+        textToRead = messageText;
+      }
+
+      await generateTTS(textToRead, playBtn);
+    } catch (err) {
+      ttsLog("❌ 点击处理异常：" + (err && err.message ? err.message : err));
+      resetPlayState();
+    }
+  });
+}
+
+// 按设置里的开始/结束标记提取文本；提取不到返回空串
+// 把各种弯引号、全角引号统一成直引号，这样无论标记设直/弯都能匹配
+function normalizeQuotes(s) {
+  if (!s) return s;
+  return s
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u3003\uFF02]/g, '"')   // “ ” „ ‟ ″ 〃 ＂ → "
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\uFF07]/g, "'");        // ‘ ’ ‚ ‛ ′ ＇ → '
+}
+
+function extractMarkedText(message) {
+  const startRaw = $("#image_text_start").val();
+  const endRaw = $("#image_text_end").val();
+  if (!startRaw || !endRaw) return "";
+
+  // 引号通用化：消息和标记都规整一遍，直/弯引号互通
+  message = normalizeQuotes(message);
+
+  // 用空格拆成多组标记，按顺序配对：开始[i] 配 结束[i]
+  const starts = normalizeQuotes(startRaw).split(/\s+/).filter(Boolean);
+  const ends = normalizeQuotes(endRaw).split(/\s+/).filter(Boolean);
+  const pairCount = Math.min(starts.length, ends.length);
+  if (pairCount === 0) return "";
+
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found = []; // {pos, text}
+
+  for (let p = 0; p < pairCount; p++) {
+    const s = starts[p], e = ends[p];
+    if (s === e) {
+      // 起止相同（如引号）：用配对算法
+      let inside = false, cur = "", startPos = -1;
+      for (let i = 0; i < message.length; i++) {
+        const ch = message[i];
+        if (ch === s) {
+          if (!inside) { inside = true; cur = ""; startPos = i; }
+          else { if (cur.trim()) found.push({ pos: startPos, text: cur.trim() }); inside = false; cur = ""; }
+        } else if (inside) { cur += ch; }
+      }
+    } else {
+      // 起止不同（如 【】（））：用正则
+      const re = new RegExp(esc(s) + "([\\s\\S]*?)" + esc(e), "g");
+      let m;
+      while ((m = re.exec(message)) !== null) {
+        if (m[1].trim()) found.push({ pos: m.index, text: m[1].trim() });
+      }
+    }
+  }
+
+  if (found.length === 0) return "";
+  // 按在消息里出现的先后顺序合并，读起来顺
+  found.sort((a, b) => a.pos - b.pos);
+  return found.map(f => f.text).join("，");
+}
+
+// 监听消息事件，自动提取文本并生成语音
+function setupMessageListener() {
+  console.log('设置消息监听器');
+  console.log('事件类型:', event_types);
+  console.log('eventSource 对象:', eventSource);
+  
+  // 测试事件是否正常触发
+  try {
+    // 测试监听所有消息事件
+    console.log('尝试监听所有消息相关事件...');
+    
+    // 监听消息添加事件
+    if (event_types.MESSAGE_SENT) {
+      eventSource.on(event_types.MESSAGE_SENT, () => {
+        console.log('检测到MESSAGE_SENT事件');
+      });
+    }
+    
+    // 监听消息接收事件
+    if (event_types.MESSAGE_RECEIVED) {
+      eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+        console.log('检测到MESSAGE_RECEIVED事件');
+      });
+    }
+    
+    // 监听聊天更新事件  
+    if (event_types.CHAT_CHANGED) {
+      eventSource.on(event_types.CHAT_CHANGED, () => {
+        console.log('检测到CHAT_CHANGED事件');
+      });
+    }
+  } catch (error) {
+    console.error('设置测试监听器出错:', error);
+  }
+  
+  // 监听SillyTavern的消息事件
+  eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, async (messageId) => {
+    console.log('角色消息渲染:', messageId);
+    
+    // 防止重复处理同一条消息
+    if (audioState.lastProcessedMessageId === messageId) {
+      console.log('消息已处理，跳过:', messageId);
+      return;
+    }
+    
+    console.log('新消息，准备处理:', messageId);
+    
+    // 检查是否开启自动朗读
+    const autoPlay = $("#auto_play_audio").prop("checked");
+    if (!autoPlay) {
+      console.log('自动朗读未开启');
+      return;
+    }
+    
+    // 清除之前的延时器
+    if (audioState.processingTimeout) {
+      clearTimeout(audioState.processingTimeout);
+    }
+    
+    // 使用防抖处理，等待消息完全渲染
+    audioState.processingTimeout = setTimeout(() => {
+      console.log('延时处理开始:', messageId);
+      // 再次检查是否已处理
+      if (audioState.lastProcessedMessageId === messageId) {
+        console.log('消息在延迟期间已被处理，跳过');
+        return;
+      }
+      
+      // 标记为已处理
+      audioState.lastProcessedMessageId = messageId;
+      console.log('处理消息:', messageId);
+      const messageElement = $(`.mes[mesid="${messageId}"]`);
+      console.log('查找消息元素:', messageElement.length > 0 ? '找到' : '未找到');
+      
+      const message = messageElement.find('.mes_text').text();
+      console.log('消息内容长度:', message ? message.length : 0);
+      
+      if (!message) {
+        console.log('消息内容为空');
+        return;
+      }
+      
+      const textStart = $("#image_text_start").val();
+      const textEnd = $("#image_text_end").val();
+      
+      console.log('检查标记:', { textStart, textEnd, 消息内容: message.substring(0, 100) });
+      
+      if (textStart && textEnd) {
+        let extractedTexts = [];
+        
+        // 添加调试日志
+        console.log('原始消息:', message);
+        console.log('消息中的引号位置:');
+        for (let i = 0; i < message.length; i++) {
+          if (message[i] === '"' || message[i] === '"' || message[i] === '"' || message[i] === '"') {
+            console.log(`位置${i}: "${message[i]}" (字符码: ${message[i].charCodeAt(0)})`);
+          }
+        }
+        
+        // 判断开始和结束标记是否相同（如英文引号）
+        if (textStart === textEnd) {
+          // 相同标记：使用更智能的配对算法
+          let insideQuote = false;
+          let currentText = '';
+          let pairCount = 0;
+          
+          for (let i = 0; i < message.length; i++) {
+            const char = message[i];
+            
+            if (char === textStart) {
+              if (!insideQuote) {
+                // 开始引号
+                console.log(`位置${i}: 开始第${pairCount + 1}对引号`);
+                insideQuote = true;
+                currentText = '';
+              } else {
+                // 结束引号
+                console.log(`位置${i}: 结束第${pairCount + 1}对引号，内容: "${currentText}"`);
+                if (currentText.trim()) {
+                  extractedTexts.push(currentText.trim());
+                  pairCount++;
+                  console.log(`提取第${pairCount}对引号内容:`, currentText.trim());
+                }
+                insideQuote = false;
+                currentText = '';
+              }
+            } else if (insideQuote) {
+              currentText += char;
+            }
+          }
+        } else {
+          // 不同标记：使用正则表达式
+          const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const escapedStart = escapeRegex(textStart);
+          const escapedEnd = escapeRegex(textEnd);
+          
+          const regex = new RegExp(`${escapedStart}(.*?)${escapedEnd}`, 'g');
+          const matches = message.match(regex);
+          
+          if (matches && matches.length > 0) {
+            console.log(`找到${matches.length}个标记内容`);
+            
+            matches.forEach(match => {
+              const cleanText = match.replace(textStart, '').replace(textEnd, '').trim();
+              if (cleanText) {
+                extractedTexts.push(cleanText);
+              }
+            });
+          }
+        }
+        
+        if (extractedTexts.length > 0) {
+          const finalText = extractedTexts.join(' ');
+          console.log('自动朗读标记内文本:', finalText);
+          generateTTS(finalText);
+          return; // 重要：找到标记就不读全文
+        }
+        
+        // 设置了标记但没找到匹配内容，不朗读
+        console.log('设置了标记但未找到匹配内容，跳过朗读');
+      } else {
+        // 没有设置标记，朗读全文
+        console.log('未设置标记，自动朗读全文:', message.substring(0, 100));
+        console.log('开始生成TTS...');
+        generateTTS(message);
+      }
+    }, 1000); // 延迟1000ms等待DOM完全更新，包括世界书和COT
+  });
+  
+  // 用户消息监听
+  eventSource.on(event_types.USER_MESSAGE_RENDERED, async (messageId) => {
+    console.log('用户消息渲染:', messageId);
+    
+    // 防止重复处理同一条用户消息
+    if (audioState.lastProcessedUserMessageId === messageId) {
+      console.log('用户消息已处理，跳过:', messageId);
+      return;
+    }
+    
+    const autoPlayUser = $("#auto_play_user").prop("checked");
+    if (!autoPlayUser) {
+      console.log('用户消息自动朗读未开启');
+      return;
+    }
+    console.log('用户消息自动朗读已开启');
+    
+    // 标记为已处理
+    audioState.lastProcessedUserMessageId = messageId;
+    
+    setTimeout(() => {
+      console.log('用户消息延时处理开始:', messageId);
+      const messageElement = $(`.mes[mesid="${messageId}"]`);
+      console.log('用户消息元素:', messageElement.length > 0 ? '找到' : '未找到');
+      
+      const message = messageElement.find('.mes_text').text();
+      console.log('用户消息内容长度:', message ? message.length : 0);
+      if (!message) {
+        console.log('用户消息内容为空');
+        return;
+      }
+      
+      const textStart = $("#image_text_start").val();
+      const textEnd = $("#image_text_end").val();
+      
+      console.log('用户消息 - 检查标记:', { textStart, textEnd, 消息内容: message.substring(0, 100) });
+      
+      if (textStart && textEnd) {
+        let extractedTexts = [];
+        
+        // 添加调试日志
+        console.log('用户原始消息:', message);
+        console.log('用户消息中的引号位置:');
+        for (let i = 0; i < message.length; i++) {
+          if (message[i] === '"' || message[i] === '"' || message[i] === '"' || message[i] === '"') {
+            console.log(`位置${i}: "${message[i]}" (字符码: ${message[i].charCodeAt(0)})`);
+          }
+        }
+        
+        // 判断开始和结束标记是否相同（如英文引号）
+        if (textStart === textEnd) {
+          // 相同标记：使用更智能的配对算法
+          let insideQuote = false;
+          let currentText = '';
+          let pairCount = 0;
+          
+          for (let i = 0; i < message.length; i++) {
+            const char = message[i];
+            
+            if (char === textStart) {
+              if (!insideQuote) {
+                // 开始引号
+                console.log(`用户消息 - 位置${i}: 开始第${pairCount + 1}对引号`);
+                insideQuote = true;
+                currentText = '';
+              } else {
+                // 结束引号
+                console.log(`用户消息 - 位置${i}: 结束第${pairCount + 1}对引号，内容: "${currentText}"`);
+                if (currentText.trim()) {
+                  extractedTexts.push(currentText.trim());
+                  pairCount++;
+                  console.log(`用户消息 - 提取第${pairCount}对引号内容:`, currentText.trim());
+                }
+                insideQuote = false;
+                currentText = '';
+              }
+            } else if (insideQuote) {
+              currentText += char;
+            }
+          }
+        } else {
+          // 不同标记：使用正则表达式
+          const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const escapedStart = escapeRegex(textStart);
+          const escapedEnd = escapeRegex(textEnd);
+          
+          const regex = new RegExp(`${escapedStart}(.*?)${escapedEnd}`, 'g');
+          const matches = message.match(regex);
+          
+          if (matches && matches.length > 0) {
+            console.log(`用户消息 - 找到${matches.length}个标记内容`);
+            
+            matches.forEach(match => {
+              const cleanText = match.replace(textStart, '').replace(textEnd, '').trim();
+              if (cleanText) {
+                extractedTexts.push(cleanText);
+              }
+            });
+          }
+        }
+        
+        if (extractedTexts.length > 0) {
+          const finalText = extractedTexts.join(' ');
+          console.log('用户消息 - 自动朗读标记内文本:', finalText);
+          generateTTS(finalText);
+          return;
+        }
+        
+        // 设置了标记但没找到匹配内容，不朗读
+        console.log('用户消息 - 设置了标记但未找到匹配内容，跳过朗读');
+      } else {
+        // 没有设置标记，朗读全文
+        console.log('用户消息 - 未设置标记，自动朗读全文:', message.substring(0, 100));
+        generateTTS(message);
+      }
+    }, 500);
+  });
+
+  // 给每条消息补上小喇叭按钮：消息渲染、切换聊天时各注入一次，再加兜底巡逻
+  eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
+    setTimeout(injectPlayButton, 200);
+    setTimeout(ensurePersistentPlayerBar, 250);
+  });
+  eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
+    setTimeout(injectPlayButton, 200);
+    setTimeout(ensurePersistentPlayerBar, 250);
+  });
+  if (event_types.CHAT_CHANGED) {
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+      setTimeout(injectPlayButton, 300);
+      setTimeout(ensurePersistentPlayerBar, 350);
+    });
+  }
+  setInterval(injectPlayButton, 2000);
+}
+
+// 克隆音色功能
+async function uploadVoice() {
+  const apiKey = extension_settings[extensionName].apiKey;
+  const voiceName = $("#clone_voice_name").val();
+  const voiceText = $("#clone_voice_text").val();
+  const audioFile = $("#clone_voice_audio")[0].files[0];
+  
+  if (!apiKey) {
+    toastr.error("请先配置API密钥", "克隆音色错误");
+    return;
+  }
+  
+  if (!voiceName || !voiceText || !audioFile) {
+    toastr.error("请填写音色名称、参考文本并选择音频文件", "克隆音色错误");
+    return;
+  }
+  
+  // 验证音色名称格式
+  const namePattern = /^[a-zA-Z0-9_-]+$/;
+  if (!namePattern.test(voiceName)) {
+    toastr.error("音色名称只能包含英文字母、数字、下划线和连字符", "格式错误");
+    return;
+  }
+  
+  if (voiceName.length > 64) {
+    toastr.error("音色名称不能超过64个字符", "格式错误");
+    return;
+  }
+  
+  try {
+    console.log("开始上传音色...");
+    
+    // 根据API文档，有两种方式上传：base64或文件
+    // 先尝试用base64方式
+    const reader = new FileReader();
+    
+    reader.onload = async function(e) {
+      try {
+        const base64Audio = e.target.result; // 这将包含 data:audio/mpeg;base64,xxx 格式
+        
+        // 使用JSON格式发送，因为API文档显示可以用base64
+        const requestBody = {
+          model: 'FunAudioLLM/CosyVoice2-0.5B',
+          customName: voiceName,
+          text: voiceText,
+          audio: base64Audio // 直接使用完整的base64字符串，包含data:audio/mpeg;base64头
+        };
+        
+        const response = await fetch(`${extension_settings[extensionName].apiUrl}/uploads/audio/voice`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Upload error response:", errorText);
+          
+          // 如果JSON方式失败，尝试FormData方式
+          console.log("JSON上传失败，尝试FormData方式...");
+          
+          const formData = new FormData();
+          formData.append('model', 'FunAudioLLM/CosyVoice2-0.5B');
+          formData.append('customName', voiceName);
+          formData.append('text', voiceText);
+          
+          // 创建一个Blob对象从base64
+          const base64Data = base64Audio.split(',')[1];
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], {type: audioFile.type});
+          
+          formData.append('audio', blob, audioFile.name);
+          
+          const response2 = await fetch(`${extension_settings[extensionName].apiUrl}/uploads/audio/voice`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: formData
+          });
+          
+          if (!response2.ok) {
+            throw new Error(`HTTP ${response2.status}: ${await response2.text()}`);
+          }
+          
+          const data = await response2.json();
+          console.log("音色上传成功(FormData):", data);
+        } else {
+          const data = await response.json();
+          console.log("音色上传成功(JSON):", data);
+        }
+        
+        // 清空输入
+        $("#clone_voice_name").val("");
+        $("#clone_voice_text").val("");
+        $("#clone_voice_audio").val("");
+        
+        toastr.success(`音色 "${voiceName}" 克隆成功！`, "克隆音色");
+        
+        // 刷新音色列表
+        await loadCustomVoices();
+        
+      } catch (error) {
+        console.error("Voice Clone Error:", error);
+        toastr.error(`音色克隆失败: ${error.message}`, "克隆音色错误");
+      }
+    };
+    
+    reader.readAsDataURL(audioFile);
+    
+  } catch (error) {
+    console.error("Voice Clone Error:", error);
+    toastr.error(`音色克隆失败: ${error.message}`, "克隆音色错误");
+  }
+}
+
+// 获取自定义音色列表
+async function loadCustomVoices() {
+  const apiKey = extension_settings[extensionName].apiKey;
+  
+  if (!apiKey) return;
+  
+  try {
+    const response = await fetch(`${extension_settings[extensionName].apiUrl}/audio/voice/list`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log("自定义音色列表:", data);
+    
+    // 保存到设置 - 注意API返回的是result不是results
+    extension_settings[extensionName].customVoices = data.result || data.results || [];
+    
+    // 打印第一个音色的结构以便调试
+    if (extension_settings[extensionName].customVoices.length > 0) {
+      console.log("第一个自定义音色结构:", extension_settings[extensionName].customVoices[0]);
+    }
+    
+    // 更新UI显示
+    updateCustomVoicesList();
+    updateVoiceOptions();
+    
+  } catch (error) {
+    console.error("Load Custom Voices Error:", error);
+  }
+}
+
+// 更新自定义音色列表显示
+function updateCustomVoicesList() {
+  const customVoices = extension_settings[extensionName].customVoices || [];
+  const listContainer = $("#custom_voices_list");
+  
+  if (customVoices.length === 0) {
+    listContainer.html("<small>暂无自定义音色</small>");
+    return;
+  }
+  
+  let html = "";
+  customVoices.forEach(voice => {
+    const voiceName = voice.name || voice.customName || voice.custom_name || "未命名";
+    const voiceUri = voice.uri || voice.id || voice.voice_id;
+    html += `
+      <div class="custom-voice-item" style="margin: 5px 0; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+        <span>${voiceName}</span>
+        <button class="menu_button delete-voice" data-uri="${voiceUri}" data-name="${voiceName}" style="float: right; padding: 2px 8px; font-size: 12px;">删除</button>
+      </div>
+    `;
+  });
+  
+  listContainer.html(html);
+}
+
+// 删除自定义音色
+async function deleteCustomVoice(uri, name) {
+  const apiKey = extension_settings[extensionName].apiKey;
+  
+  if (!apiKey) {
+    toastr.error("请先配置API密钥", "删除音色错误");
+    return;
+  }
+  
+  if (!confirm(`确定要删除音色 "${name}" 吗？`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${extension_settings[extensionName].apiUrl}/audio/voice/deletions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ uri: uri })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    toastr.success(`音色 "${name}" 已删除`, "删除成功");
+    
+    // 刷新列表
+    await loadCustomVoices();
+    
+  } catch (error) {
+    console.error("Delete Voice Error:", error);
+    toastr.error(`删除失败: ${error.message}`, "删除音色错误");
+  }
+}
+
+// jQuery加载时初始化
+jQuery(async () => {
+  const settingsHtml = await $.get(`${extensionFolderPath}/example.html`);
+  $("#extensions_settings").append(settingsHtml);
+  
+  // Inline drawer 折叠/展开功能 - 使用延迟绑定
+  setTimeout(() => {
+    $('.siliconflow-extension-settings .inline-drawer-toggle').each(function() {
+      $(this).off('click').on('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const $header = $(this);
+        const $icon = $header.find('.inline-drawer-icon');
+        const $content = $header.next('.inline-drawer-content');
+        const isOpen = $content.data('open') === true;
+        
+        if (isOpen) {
+          // 收起
+          $content.data('open', false);
+          $content.hide();
+          $icon.removeClass('down');
+        } else {
+          // 展开
+          $content.data('open', true);
+          $content.show();
+          $icon.addClass('down');
+        }
+      });
+    });
+  }, 100);
+  
+  // 绑定事件
+  $("#save_siliconflow_settings").on("click", saveSettings);
+  
+  // 克隆音色功能事件
+  $("#upload_voice").on("click", uploadVoice);
+  $("#refresh_custom_voices").on("click", loadCustomVoices);
+  
+  // 删除音色事件（使用事件委托）
+  $(document).on("click", ".delete-voice", function() {
+    const uri = $(this).data("uri");
+    const name = $(this).data("name");
+    deleteCustomVoice(uri, name);
+  });
+  
+  // 自动保存复选框状态
+  $("#auto_play_audio").on("change", function() {
+    extension_settings[extensionName].autoPlay = $(this).prop("checked");
+    saveSettingsDebounced();
+    console.log("自动朗读角色消息:", $(this).prop("checked"));
+  });
+  
+  $("#auto_play_user").on("change", function() {
+    extension_settings[extensionName].autoPlayUser = $(this).prop("checked");
+    saveSettingsDebounced();
+    console.log("自动朗读用户消息:", $(this).prop("checked"));
+  });
+  
+  // 标记设置自动保存
+  $("#image_text_start, #image_text_end").on("input", function() {
+    extension_settings[extensionName].textStart = $("#image_text_start").val();
+    extension_settings[extensionName].textEnd = $("#image_text_end").val();
+    saveSettingsDebounced();
+  });
+  $("#test_siliconflow_connection").on("click", testConnection);
+  $("#tts_model").on("change", updateVoiceOptions);
+  $("#tts_voice").on("change", function() {
+    extension_settings[extensionName].ttsVoice = $(this).val();
+    console.log("选择的音色:", $(this).val());
+  });
+  $("#tts_speed").on("input", function() {
+    $("#tts_speed_value").text($(this).val());
+  });
+  $("#tts_gain").on("input", function() {
+    $("#tts_gain_value").text($(this).val());
+  });
+  
+  // TTS测试按钮
+  $("#test_tts").on("click", async function() {
+    primeAudioOnce(); // 用户手势内解锁音频
+    // 先保存当前选择的音色
+    extension_settings[extensionName].ttsVoice = $("#tts_voice").val();
+    const testText = $("#tts_test_text").val() || "你好，这是一个测试语音。";
+    await generateTTS(testText);
+  });
+  
+  // 加载设置
+  await loadSettings();
+  
+  // 加载自定义音色列表
+  await loadCustomVoices();
+  
+  // 设置消息监听器
+  setupMessageListener();
+
+  // 注入按钮高亮样式
+  injectTTSStyle();
+
+  // 启用点击事件委托（消息重绘也能接住点击）
+  bindPlayButtonDelegation();
+
+  // 首次触屏/点击时自动解锁移动端音频（只需成功一次，之后都能出声）
+  $(document).on("pointerdown.ttsprime touchstart.ttsprime click.ttsprime", function () {
+    primeAudioOnce();
+    if (audioPrimed) $(document).off(".ttsprime");
+  });
+
+  // 初始化时给现有消息补上播放按钮
+  setTimeout(injectPlayButton, 800);
+
+  // 在设置里加「语音进度条 开/关」开关
+  createBarToggle();
+
+  // 播放条：按开关决定是否常驻显示
+  const barOn = shouldKeepPlayerBarVisible(); // 默认开
+  if (barOn) {
+    ensurePersistentPlayerBar();
+    [600, 1500, 3000].forEach((ms) => setTimeout(ensurePersistentPlayerBar, ms));
+  }
+  setInterval(() => {
+    injectPlayButton(); // ▶ 按钮始终维护
+    const on = shouldKeepPlayerBarVisible();
+    if (!on) return; // 开关关掉时不强制显示进度条
+    if (!document.getElementById("tts-player-bar")) {
+      ttsAudioEl = null;
+      ensurePersistentPlayerBar();
+    } else {
+      ensurePersistentPlayerBar();
+    }
+  }, 2000);
+
+  ttsLog("🟢 插件已加载。点消息上的 ▶ 看每一步日志。");
+  
+  console.log("硅基流动插件已加载");
+  console.log("自动朗读功能已启用，请在控制台查看调试信息");
+  console.log('事件源:', eventSource);
+  console.log('事件类型:', event_types);
+  console.log('角色消息事件:', event_types.CHARACTER_MESSAGE_RENDERED);
+  console.log('用户消息事件:', event_types.USER_MESSAGE_RENDERED);
+});
+
+export { generateTTS };
