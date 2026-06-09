@@ -77,13 +77,14 @@ const defaultSettings = {
   sampleRate: 32000,
   imageModel: "",
   imageSize: "512",
-  textStart: "（",
-  textEnd: "）",
+  textStart: "（ 【 \"",
+  textEnd: "） 】 \"",
   generationFrequency: 5,
   autoPlay: true,
   autoPlayUser: false,
   barPersistent: true,
   ttsPlaybackRate: 1.0,
+  maxReadChars: 0,
   customVoices: [] // 存储自定义音色列表
 };
 
@@ -129,6 +130,7 @@ async function loadSettings() {
   $("#generation_frequency").val(extension_settings[extensionName].generationFrequency || defaultSettings.generationFrequency);
   $("#auto_play_audio").prop("checked", extension_settings[extensionName].autoPlay !== false);
   $("#auto_play_user").prop("checked", extension_settings[extensionName].autoPlayUser === true);
+  $("#tts_max_read_chars").val(extension_settings[extensionName].maxReadChars || "");
   
   updateVoiceOptions();
 }
@@ -189,6 +191,7 @@ function saveSettings() {
   extension_settings[extensionName].generationFrequency = parseInt($("#generation_frequency").val());
   extension_settings[extensionName].autoPlay = $("#auto_play_audio").prop("checked");
   extension_settings[extensionName].autoPlayUser = $("#auto_play_user").prop("checked");
+  extension_settings[extensionName].maxReadChars = parseInt($("#tts_max_read_chars").val()) || 0;
   
   saveSettingsDebounced();
   // 移除弹窗提示，改为控制台日志
@@ -243,6 +246,14 @@ async function generateTTS(text, buttonElement = null) {
     return;
   }
 
+  const maxReadCharsBeforeCache = parseInt($("#tts_max_read_chars").val() || extension_settings[extensionName].maxReadChars || 0);
+  if (maxReadCharsBeforeCache > 0 && text.length > maxReadCharsBeforeCache) {
+    ttsLog(`⚠ 文本 ${text.length} 字，超过上限 ${maxReadCharsBeforeCache} 字，已跳过朗读`);
+    toastr.info(`文本超过 ${maxReadCharsBeforeCache} 字，已跳过朗读`, "TTS");
+    resetPlayState();
+    return null;
+  }
+
   ttsLog("① 进入生成，文本长度 " + text.length + "：「" + text.substring(0, 30) + "」");
 
   // 先熄灭其它按钮，再把当前按钮立刻点亮成“生成中（黄）”——任何一次点击都能马上看到反馈
@@ -261,14 +272,6 @@ async function generateTTS(text, buttonElement = null) {
   
   try {
     console.log("正在生成语音...");
-
-    // 安全上限：硅基流动单次合成有长度限制，过长会卡住或失败，这里截断保护
-    const MAX_LEN = 1000;
-    if (text.length > MAX_LEN) {
-      console.warn(`文本过长(${text.length})，已截断到 ${MAX_LEN} 字`);
-      text = text.substring(0, MAX_LEN);
-      toastr.info(`文本较长，已截断到 ${MAX_LEN} 字朗读`, "TTS");
-    }
 
     const voiceValue = $("#tts_voice").val() || "alex";
     const speed = parseFloat($("#tts_speed").val()) || 1.0;
@@ -746,7 +749,7 @@ function createBarToggle() {
     '</div>'
   );
   // 放在「文本截取设置 / TTS测试」这一块前面，醒目
-  const flexC = $(".siliconflow-extension-settings .inline-drawer-content .flex-container").first();
+  const flexC = $(".siliconflow-extension-settings .inline-drawer-content .sf-settings, .siliconflow-extension-settings .inline-drawer-content .flex-container").first();
   if (flexC.length > 0) flexC.prepend(section);
   else $("#extensions_settings").append(section);
 
@@ -881,14 +884,14 @@ function injectTTSStyle() {
     .tts-manual-play-btn:hover { color: #e0e0e0; }
     /* 生成中：荧光黄，符号本身发光 + 跳动 */
     .tts-manual-play-btn.tts-loading {
-      color: #f6ff00 !important;
-      text-shadow: 0 0 6px #f6ff00, 0 0 14px #f6ff00, 0 0 2px #ffffff;
+      color: #fcff60ff !important;
+      text-shadow: 0 0 6px #fcff60ff, 0 0 14px #fcff60ff, 0 0 2px #ffffff;
       animation: ttsGlowPulse 0.8s infinite;
     }
     /* 播放中：荧光青绿，符号发光 + 放大 */
     .tts-manual-play-btn.tts-playing {
-      color: #00ffae !important;
-      text-shadow: 0 0 6px #00ffae, 0 0 16px #00ffae, 0 0 2px #ffffff;
+      color: #7dffd6ff !important;
+      text-shadow: 0 0 6px #7dffd6ff, 0 0 16px #7dffd6ff, 0 0 2px #ffffff;
       transform: scale(1.2);
     }
   `;
@@ -1031,6 +1034,19 @@ function extractMarkedText(message) {
   return found.map(f => f.text).join("，");
 }
 
+function getMessageTextForTts(message, logPrefix = "TTS") {
+  const markedText = extractMarkedText(message);
+  if (markedText) {
+    console.log(`${logPrefix} - 提取标记内文本:`, markedText);
+    ttsLog(`✂ ${logPrefix}：按标记截取到 ${markedText.length} 字`);
+    return markedText;
+  }
+
+  console.log(`${logPrefix} - 未提取到标记内容，改读全文:`, message.substring(0, 100));
+  ttsLog(`⚠ ${logPrefix}：未截取到标记内文字 → 读全文`);
+  return message;
+}
+
 // 监听消息事件，自动提取文本并生成语音
 function setupMessageListener() {
   console.log('设置消息监听器');
@@ -1112,6 +1128,9 @@ function setupMessageListener() {
         console.log('消息内容为空');
         return;
       }
+
+      generateTTS(getMessageTextForTts(message, "角色自动朗读"));
+      return;
       
       const textStart = $("#image_text_start").val();
       const textEnd = $("#image_text_end").val();
@@ -1231,6 +1250,9 @@ function setupMessageListener() {
         console.log('用户消息内容为空');
         return;
       }
+
+      generateTTS(getMessageTextForTts(message, "用户自动朗读"));
+      return;
       
       const textStart = $("#image_text_start").val();
       const textEnd = $("#image_text_end").val();
@@ -1533,7 +1555,7 @@ async function deleteCustomVoice(uri, name) {
     return;
   }
   
-  if (!confirm(`确定要删除音色 "${name}" 吗？`)) {
+  if (!confirm(`确定要删除克隆音色「${name}」吗？\n删除后需要重新上传才能恢复。`)) {
     return;
   }
   
@@ -1622,9 +1644,10 @@ jQuery(async () => {
   });
   
   // 标记设置自动保存
-  $("#image_text_start, #image_text_end").on("input", function() {
+  $("#image_text_start, #image_text_end, #tts_max_read_chars").on("input", function() {
     extension_settings[extensionName].textStart = $("#image_text_start").val();
     extension_settings[extensionName].textEnd = $("#image_text_end").val();
+    extension_settings[extensionName].maxReadChars = parseInt($("#tts_max_read_chars").val()) || 0;
     saveSettingsDebounced();
   });
   $("#test_siliconflow_connection").on("click", testConnection);
