@@ -83,6 +83,7 @@ const defaultSettings = {
   autoPlay: true,
   autoPlayUser: false,
   barPersistent: true,
+  playerBarSize: "small",
   ttsPlaybackRate: 1.0,
   customVoices: [] // 存储自定义音色列表
 };
@@ -360,6 +361,23 @@ function shouldKeepPlayerBarVisible() {
   return extension_settings[extensionName]?.barPersistent !== false;
 }
 
+function isLargePlayerBarMode() {
+  return extension_settings[extensionName]?.playerBarSize === "large";
+}
+
+function updatePlayerBarSizeMenuText() {
+  const item = document.getElementById("tts-player-size-toggle");
+  if (item) item.textContent = isLargePlayerBarMode() ? "小进度条" : "大进度条";
+}
+
+function setPlayerBarSizeMode(size) {
+  extension_settings[extensionName].playerBarSize = size === "large" ? "large" : "small";
+  saveSettingsDebounced();
+  updatePlayerBarSizeMenuText();
+  const bar = document.getElementById("tts-player-bar");
+  if (bar) applyResponsivePlayerBarLayout(bar);
+}
+
 function getSilentAudioUrl() {
   if (!silentAudioUrl) silentAudioUrl = makeSilentWavUrl();
   return silentAudioUrl;
@@ -454,7 +472,8 @@ function positionPlayerBarNearAnchor(bar, anchorElement) {
 function applyResponsivePlayerBarLayout(bar) {
   if (!bar) return;
 
-  const compact = window.innerWidth <= 720;
+  const isMobileWidth = window.innerWidth <= 720;
+  const compact = isMobileWidth && !isLargePlayerBarMode();
   const progress = document.getElementById("tts-player-progress");
   const timeText = document.getElementById("tts-player-time");
   const dragLabel = document.getElementById("tts-player-drag-label");
@@ -465,13 +484,13 @@ function applyResponsivePlayerBarLayout(bar) {
   if (dragLabel) dragLabel.style.display = compact ? "none" : "inline";
   if (versionTag) versionTag.style.display = compact ? "none" : "inline";
   if (!playerBarDragged) {
-    bar.style.top = compact ? "60%" : "auto";
-    bar.style.left = compact ? "10px" : "20px";
+    bar.style.top = isMobileWidth ? "60%" : "auto";
+    bar.style.left = isMobileWidth ? "10px" : "20px";
     bar.style.right = "auto";
-    bar.style.bottom = compact ? "auto" : "calc(92px + env(safe-area-inset-bottom, 0px))";
-    bar.style.transform = compact ? "translateY(-50%)" : "none";
+    bar.style.bottom = isMobileWidth ? "auto" : "calc(92px + env(safe-area-inset-bottom, 0px))";
+    bar.style.transform = isMobileWidth ? "translateY(-50%)" : "none";
     bar.style.width = "auto";
-    bar.style.maxWidth = compact ? "calc(100vw - 20px)" : "calc(100vw - 40px)";
+    bar.style.maxWidth = isMobileWidth ? "calc(100vw - 20px)" : "calc(100vw - 40px)";
     bar.style.boxSizing = "border-box";
     bar.style.justifyContent = "flex-start";
     bar.style.gap = compact ? "4px" : "8px";
@@ -714,9 +733,17 @@ function getTtsAudioEl() {
     const resetPositionItem = makeMenuItem("重置位置", () => {
       playerBarDragged = false;
       applyResponsivePlayerBarLayout(bar);
+      updatePlayerBarSizeMenuText();
       menu.style.display = "none";
     });
     menu.appendChild(resetPositionItem);
+
+    const sizeToggleItem = makeMenuItem(isLargePlayerBarMode() ? "小进度条" : "大进度条", () => {
+      setPlayerBarSizeMode(isLargePlayerBarMode() ? "small" : "large");
+      menu.style.display = "none";
+    });
+    sizeToggleItem.id = "tts-player-size-toggle";
+    menu.appendChild(sizeToggleItem);
 
     const speedTitle = document.createElement("div");
     speedTitle.textContent = "播放速度";
