@@ -3,7 +3,7 @@ import { saveSettingsDebounced, eventSource, event_types } from "../../../../scr
 
 // 扩展配置：按实际安装文件夹自动识别，避免仓库名改了以后找不到 example.html
 const extensionFolderPath = new URL(".", import.meta.url).pathname.replace(/\/$/, "");
-const extensionName = decodeURIComponent(extensionFolderPath.split("/").pop() || "ST-siliconflow-tts");
+const extensionName = decodeURIComponent(extensionFolderPath.split("/").pop() || "sillytavern-siliconflow-tts");
 
 // 全局状态管理
 const audioState = {
@@ -77,14 +77,13 @@ const defaultSettings = {
   sampleRate: 32000,
   imageModel: "",
   imageSize: "512",
-  textStart: "（ 【 \"",
-  textEnd: "） 】 \"",
+  textStart: "（",
+  textEnd: "）",
   generationFrequency: 5,
   autoPlay: true,
   autoPlayUser: false,
   barPersistent: true,
   ttsPlaybackRate: 1.0,
-  maxReadChars: 0,
   customVoices: [] // 存储自定义音色列表
 };
 
@@ -130,7 +129,6 @@ async function loadSettings() {
   $("#generation_frequency").val(extension_settings[extensionName].generationFrequency || defaultSettings.generationFrequency);
   $("#auto_play_audio").prop("checked", extension_settings[extensionName].autoPlay !== false);
   $("#auto_play_user").prop("checked", extension_settings[extensionName].autoPlayUser === true);
-  $("#tts_max_read_chars").val(extension_settings[extensionName].maxReadChars || "");
   
   updateVoiceOptions();
 }
@@ -191,7 +189,6 @@ function saveSettings() {
   extension_settings[extensionName].generationFrequency = parseInt($("#generation_frequency").val());
   extension_settings[extensionName].autoPlay = $("#auto_play_audio").prop("checked");
   extension_settings[extensionName].autoPlayUser = $("#auto_play_user").prop("checked");
-  extension_settings[extensionName].maxReadChars = parseInt($("#tts_max_read_chars").val()) || 0;
   
   saveSettingsDebounced();
   // 移除弹窗提示，改为控制台日志
@@ -246,14 +243,6 @@ async function generateTTS(text, buttonElement = null) {
     return;
   }
 
-  const maxReadCharsBeforeCache = parseInt($("#tts_max_read_chars").val() || extension_settings[extensionName].maxReadChars || 0);
-  if (maxReadCharsBeforeCache > 0 && text.length > maxReadCharsBeforeCache) {
-    ttsLog(`⚠ 文本 ${text.length} 字，超过上限 ${maxReadCharsBeforeCache} 字，已跳过朗读`);
-    toastr.info(`文本超过 ${maxReadCharsBeforeCache} 字，已跳过朗读`, "TTS");
-    resetPlayState();
-    return null;
-  }
-
   ttsLog("① 进入生成，文本长度 " + text.length + "：「" + text.substring(0, 30) + "」");
 
   // 先熄灭其它按钮，再把当前按钮立刻点亮成“生成中（黄）”——任何一次点击都能马上看到反馈
@@ -272,6 +261,14 @@ async function generateTTS(text, buttonElement = null) {
   
   try {
     console.log("正在生成语音...");
+
+    // 安全上限：硅基流动单次合成有长度限制，过长会卡住或失败，这里截断保护
+    const MAX_LEN = 1000;
+    if (text.length > MAX_LEN) {
+      console.warn(`文本过长(${text.length})，已截断到 ${MAX_LEN} 字`);
+      text = text.substring(0, MAX_LEN);
+      toastr.info(`文本较长，已截断到 ${MAX_LEN} 字朗读`, "TTS");
+    }
 
     const voiceValue = $("#tts_voice").val() || "alex";
     const speed = parseFloat($("#tts_speed").val()) || 1.0;
@@ -433,26 +430,51 @@ function applyResponsivePlayerBarLayout(bar) {
   const compact = window.innerWidth <= 720;
   const progress = document.getElementById("tts-player-progress");
   const timeText = document.getElementById("tts-player-time");
+  const dragLabel = document.getElementById("tts-player-drag-label");
+  const versionTag = document.getElementById("tts-player-version");
+  const playBtn = document.getElementById("tts-player-play");
+  const menuBtn = document.getElementById("tts-player-menu");
+  const closeBtn = document.getElementById("tts-player-close");
+  if (dragLabel) dragLabel.style.display = compact ? "none" : "inline";
+  if (versionTag) versionTag.style.display = compact ? "none" : "inline";
   if (!playerBarDragged) {
     bar.style.top = "auto";
-    bar.style.left = "20px";
+    bar.style.left = compact ? "10px" : "20px";
     bar.style.right = "auto";
-    bar.style.bottom = "calc(92px + env(safe-area-inset-bottom, 0px))";
+    bar.style.bottom = compact ? "calc(74px + env(safe-area-inset-bottom, 0px))" : "calc(92px + env(safe-area-inset-bottom, 0px))";
     bar.style.transform = "none";
     bar.style.width = "auto";
-    bar.style.maxWidth = "calc(100vw - 40px)";
+    bar.style.maxWidth = compact ? "calc(100vw - 20px)" : "calc(100vw - 40px)";
     bar.style.boxSizing = "border-box";
     bar.style.justifyContent = "flex-start";
-    bar.style.gap = compact ? "6px" : "8px";
-    bar.style.padding = compact ? "6px 8px" : "6px 10px";
+    bar.style.gap = compact ? "4px" : "8px";
+    bar.style.padding = compact ? "4px 6px" : "6px 10px";
+    if (playBtn) {
+      playBtn.style.width = compact ? "24px" : "36px";
+      playBtn.style.height = compact ? "24px" : "34px";
+      playBtn.style.borderRadius = compact ? "12px" : "17px";
+      playBtn.style.lineHeight = compact ? "24px" : "34px";
+      playBtn.style.fontSize = compact ? "12px" : "16px";
+      playBtn.style.cursor = compact ? "move" : "pointer";
+      playBtn.title = compact ? "轻点播放/暂停，按住拖动" : "播放/暂停";
+    }
     if (progress) {
       progress.style.width = compact ? "auto" : "150px";
       progress.style.maxWidth = compact ? "none" : "30vw";
-      progress.style.flex = compact ? "1 1 48px" : "1 1 110px";
+      progress.style.flex = compact ? "0 1 42px" : "1 1 110px";
+      progress.style.height = compact ? "4px" : "6px";
     }
     if (timeText) {
-      timeText.style.minWidth = compact ? "62px" : "76px";
-      timeText.style.fontSize = compact ? "12px" : "13px";
+      timeText.style.minWidth = compact ? "42px" : "76px";
+      timeText.style.fontSize = compact ? "10px" : "13px";
+    }
+    if (menuBtn) {
+      menuBtn.style.padding = compact ? "0 4px" : "0 8px";
+      menuBtn.style.fontSize = compact ? "18px" : "22px";
+    }
+    if (closeBtn) {
+      closeBtn.style.padding = compact ? "0 2px" : "0 4px";
+      closeBtn.style.fontSize = compact ? "14px" : "16px";
     }
     return;
   }
@@ -481,15 +503,25 @@ function getTtsAudioEl() {
       "box-sizing:border-box;";
 
     const label = document.createElement("span");
+    label.id = "tts-player-drag-label";
     label.textContent = "🔊";
     label.title = "按住拖动";
     label.style.cssText = "font-size:16px;line-height:1;flex:0 0 auto;cursor:move;touch-action:none;padding:0 2px;";
 
     // 按住 🔊 可把整条播放条拖到屏幕任意位置（悬浮，不挡视线）
     let drag = null;
-    label.addEventListener("pointerdown", (e) => {
+    let playButtonWasDragged = false;
+    const startPlayerBarDrag = (e, target, fromPlayButton = false) => {
       const rect = bar.getBoundingClientRect();
-      drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+      drag = {
+        dx: e.clientX - rect.left,
+        dy: e.clientY - rect.top,
+        startX: e.clientX,
+        startY: e.clientY,
+        fromPlayButton,
+        moved: false,
+        wasDraggedBefore: playerBarDragged,
+      };
       playerBarDragged = true;
       bar.style.transform = "none";
       bar.style.left = rect.left + "px";
@@ -497,19 +529,33 @@ function getTtsAudioEl() {
       bar.style.bottom = "auto";
       bar.style.right = "auto";
       bar.style.width = bar.offsetWidth + "px";
-      try { label.setPointerCapture(e.pointerId); } catch (err) {}
-      e.preventDefault();
-    });
-    label.addEventListener("pointermove", (e) => {
+      try { target.setPointerCapture(e.pointerId); } catch (err) {}
+      if (!fromPlayButton) e.preventDefault();
+    };
+    const movePlayerBarDrag = (e) => {
       if (!drag) return;
+      const movedEnough = Math.abs(e.clientX - drag.startX) > 4 || Math.abs(e.clientY - drag.startY) > 4;
+      if (movedEnough) {
+        drag.moved = true;
+        if (drag.fromPlayButton) playButtonWasDragged = true;
+        e.preventDefault();
+      }
       let x = e.clientX - drag.dx;
       let y = e.clientY - drag.dy;
       x = Math.max(0, Math.min(x, window.innerWidth - bar.offsetWidth));
       y = Math.max(0, Math.min(y, window.innerHeight - bar.offsetHeight));
       bar.style.left = x + "px";
       bar.style.top = y + "px";
-    });
-    const endDrag = () => { drag = null; };
+    };
+    const endDrag = () => {
+      if (drag && drag.fromPlayButton && !drag.moved && !drag.wasDraggedBefore) {
+        playerBarDragged = false;
+        applyResponsivePlayerBarLayout(bar);
+      }
+      drag = null;
+    };
+    label.addEventListener("pointerdown", (e) => startPlayerBarDrag(e, label));
+    label.addEventListener("pointermove", movePlayerBarDrag);
     label.addEventListener("pointerup", endDrag);
     label.addEventListener("pointercancel", endDrag);
 
@@ -531,9 +577,19 @@ function getTtsAudioEl() {
     playBtn.style.cssText =
       "width:36px;height:34px;border:0;border-radius:17px;background:#fff;color:#000;" +
       "font-size:16px;line-height:34px;padding:0;cursor:pointer;flex:0 0 auto;";
+    playBtn.addEventListener("pointerdown", (e) => {
+      if (window.innerWidth <= 720) startPlayerBarDrag(e, playBtn, true);
+    });
+    playBtn.addEventListener("pointermove", movePlayerBarDrag);
+    playBtn.addEventListener("pointerup", endDrag);
+    playBtn.addEventListener("pointercancel", endDrag);
     playBtn.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (playButtonWasDragged) {
+        playButtonWasDragged = false;
+        return;
+      }
       const audio = getTtsAudioEl();
       if (audio.paused) {
         try {
@@ -577,11 +633,13 @@ function getTtsAudioEl() {
 
     // 我自己的「⋮」菜单按钮，点开里面有「TTS日志」
     const menuBtn = document.createElement("span");
+    menuBtn.id = "tts-player-menu";
     menuBtn.textContent = "⋮";
     menuBtn.title = "更多";
     menuBtn.style.cssText = "color:#fff;cursor:pointer;padding:0 8px;font-size:22px;font-weight:bold;line-height:1;flex:0 0 auto;";
 
     const versionTag = document.createElement("span");
+    versionTag.id = "tts-player-version";
     versionTag.textContent = "v3L";
     versionTag.title = "悬浮进度条版本";
     versionTag.style.cssText = "color:rgba(255,255,255,0.45);font-size:10px;line-height:1;flex:0 0 auto;";
@@ -658,6 +716,7 @@ function getTtsAudioEl() {
     window.addEventListener("orientationchange", () => setTimeout(() => applyResponsivePlayerBarLayout(bar), 250));
 
     const closeBtn = document.createElement("span");
+    closeBtn.id = "tts-player-close";
     closeBtn.textContent = "✕";
     closeBtn.style.cssText = "color:#fff;cursor:pointer;padding:0 4px;font-size:16px;flex:0 0 auto;";
     closeBtn.addEventListener("click", () => {
@@ -749,7 +808,7 @@ function createBarToggle() {
     '</div>'
   );
   // 放在「文本截取设置 / TTS测试」这一块前面，醒目
-  const flexC = $(".siliconflow-extension-settings .inline-drawer-content .sf-settings, .siliconflow-extension-settings .inline-drawer-content .flex-container").first();
+  const flexC = $(".siliconflow-extension-settings .inline-drawer-content .flex-container").first();
   if (flexC.length > 0) flexC.prepend(section);
   else $("#extensions_settings").append(section);
 
@@ -884,14 +943,14 @@ function injectTTSStyle() {
     .tts-manual-play-btn:hover { color: #e0e0e0; }
     /* 生成中：荧光黄，符号本身发光 + 跳动 */
     .tts-manual-play-btn.tts-loading {
-      color: #fcff60ff !important;
-      text-shadow: 0 0 6px #fcff60ff, 0 0 14px #fcff60ff, 0 0 2px #ffffff;
+      color: #f6ff00 !important;
+      text-shadow: 0 0 6px #f6ff00, 0 0 14px #f6ff00, 0 0 2px #ffffff;
       animation: ttsGlowPulse 0.8s infinite;
     }
     /* 播放中：荧光青绿，符号发光 + 放大 */
     .tts-manual-play-btn.tts-playing {
-      color: #7dffd6ff !important;
-      text-shadow: 0 0 6px #7dffd6ff, 0 0 16px #7dffd6ff, 0 0 2px #ffffff;
+      color: #00ffae !important;
+      text-shadow: 0 0 6px #00ffae, 0 0 16px #00ffae, 0 0 2px #ffffff;
       transform: scale(1.2);
     }
   `;
@@ -1034,19 +1093,6 @@ function extractMarkedText(message) {
   return found.map(f => f.text).join("，");
 }
 
-function getMessageTextForTts(message, logPrefix = "TTS") {
-  const markedText = extractMarkedText(message);
-  if (markedText) {
-    console.log(`${logPrefix} - 提取标记内文本:`, markedText);
-    ttsLog(`✂ ${logPrefix}：按标记截取到 ${markedText.length} 字`);
-    return markedText;
-  }
-
-  console.log(`${logPrefix} - 未提取到标记内容，改读全文:`, message.substring(0, 100));
-  ttsLog(`⚠ ${logPrefix}：未截取到标记内文字 → 读全文`);
-  return message;
-}
-
 // 监听消息事件，自动提取文本并生成语音
 function setupMessageListener() {
   console.log('设置消息监听器');
@@ -1128,9 +1174,6 @@ function setupMessageListener() {
         console.log('消息内容为空');
         return;
       }
-
-      generateTTS(getMessageTextForTts(message, "角色自动朗读"));
-      return;
       
       const textStart = $("#image_text_start").val();
       const textEnd = $("#image_text_end").val();
@@ -1250,9 +1293,6 @@ function setupMessageListener() {
         console.log('用户消息内容为空');
         return;
       }
-
-      generateTTS(getMessageTextForTts(message, "用户自动朗读"));
-      return;
       
       const textStart = $("#image_text_start").val();
       const textEnd = $("#image_text_end").val();
@@ -1555,7 +1595,7 @@ async function deleteCustomVoice(uri, name) {
     return;
   }
   
-  if (!confirm(`确定要删除克隆音色「${name}」吗？\n删除后需要重新上传才能恢复。`)) {
+  if (!confirm(`确定要删除音色 "${name}" 吗？`)) {
     return;
   }
   
@@ -1644,10 +1684,9 @@ jQuery(async () => {
   });
   
   // 标记设置自动保存
-  $("#image_text_start, #image_text_end, #tts_max_read_chars").on("input", function() {
+  $("#image_text_start, #image_text_end").on("input", function() {
     extension_settings[extensionName].textStart = $("#image_text_start").val();
     extension_settings[extensionName].textEnd = $("#image_text_end").val();
-    extension_settings[extensionName].maxReadChars = parseInt($("#tts_max_read_chars").val()) || 0;
     saveSettingsDebounced();
   });
   $("#test_siliconflow_connection").on("click", testConnection);
