@@ -373,6 +373,7 @@ function updatePlayerBarSizeMenuText() {
 function setPlayerBarSizeMode(size) {
   extension_settings[extensionName].playerBarSize = size === "large" ? "large" : "small";
   saveSettingsDebounced();
+  playerBarDragged = false;
   updatePlayerBarSizeMenuText();
   const bar = document.getElementById("tts-player-bar");
   if (bar) applyResponsivePlayerBarLayout(bar);
@@ -473,7 +474,8 @@ function applyResponsivePlayerBarLayout(bar) {
   if (!bar) return;
 
   const isMobileWidth = window.innerWidth <= 720;
-  const compact = isMobileWidth && !isLargePlayerBarMode();
+  const largeMobile = isMobileWidth && isLargePlayerBarMode();
+  const compact = isMobileWidth && !largeMobile;
   const progress = document.getElementById("tts-player-progress");
   const timeText = document.getElementById("tts-player-time");
   const dragLabel = document.getElementById("tts-player-drag-label");
@@ -482,14 +484,14 @@ function applyResponsivePlayerBarLayout(bar) {
   const menuBtn = document.getElementById("tts-player-menu");
   const closeBtn = document.getElementById("tts-player-close");
   if (dragLabel) dragLabel.style.display = compact ? "none" : "inline";
-  if (versionTag) versionTag.style.display = compact ? "none" : "inline";
+  if (versionTag) versionTag.style.display = isMobileWidth ? "none" : "inline";
   if (!playerBarDragged) {
     bar.style.top = isMobileWidth ? "60%" : "auto";
     bar.style.left = isMobileWidth ? "10px" : "20px";
     bar.style.right = "auto";
     bar.style.bottom = isMobileWidth ? "auto" : "calc(92px + env(safe-area-inset-bottom, 0px))";
     bar.style.transform = isMobileWidth ? "translateY(-50%)" : "none";
-    bar.style.width = "auto";
+    bar.style.width = largeMobile ? "calc(100vw - 20px)" : "auto";
     bar.style.maxWidth = isMobileWidth ? "calc(100vw - 20px)" : "calc(100vw - 40px)";
     bar.style.boxSizing = "border-box";
     bar.style.justifyContent = "flex-start";
@@ -507,12 +509,13 @@ function applyResponsivePlayerBarLayout(bar) {
     if (progress) {
       progress.style.width = compact ? "auto" : "150px";
       progress.style.maxWidth = compact ? "none" : "30vw";
-      progress.style.flex = compact ? "0 1 42px" : "1 1 110px";
+      progress.style.flex = compact ? "0 1 42px" : (largeMobile ? "1 1 96px" : "1 1 110px");
+      progress.style.minWidth = compact ? "0" : (largeMobile ? "76px" : "90px");
       progress.style.height = compact ? "4px" : "6px";
     }
     if (timeText) {
-      timeText.style.minWidth = compact ? "42px" : "76px";
-      timeText.style.fontSize = compact ? "10px" : "13px";
+      timeText.style.minWidth = compact ? "42px" : (largeMobile ? "66px" : "76px");
+      timeText.style.fontSize = compact ? "10px" : (largeMobile ? "12px" : "13px");
     }
     if (menuBtn) {
       menuBtn.style.padding = compact ? "0 4px" : "0 8px";
