@@ -96,11 +96,13 @@
 
                         <div class="setting-item button-group sf-setting-row sf-limit-row">
                             <label for="tts_max_read_chars">全文发送上限：</label>
-                            <input type="number" id="tts_max_read_chars" min="0" step="1" placeholder="大于设定字数不发送 />
+                            <input type="number" id="tts_max_read_chars" min="0" step="1" placeholder="大于设定字数不发送，留空或0=不限制" />
                         </div>
 
                         <small>
-                            多组标记时用空格隔开，如：开始填 <code>（ 【 "</code>，结束填 <code>） 】 "</code>提取不到标记内容时，会自动改读整条消息，不会卡住<br>全文发送上限,建议填1500,留空或0=不限制。
+                            多组标记时用空格隔开，如：开始填 <code>（ 【 "</code>，结束填 <code>） 】 "</code><br>
+                            提取不到标记内容时，会自动改读整条消息，不会卡住。<br>
+                            全文发送上限,建议填1500,留空或0=不限制。
                         </small>
                     </div>
                 </section>
