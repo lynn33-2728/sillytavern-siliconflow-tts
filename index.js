@@ -354,6 +354,7 @@ let silentAudioUrl = null;
 let lastTtsAudioUrl = "";
 let lastTtsDownloadName = "tts_output.mp3";
 let playerBarDragged = false;
+let playerBarAnchorElement = null;
 
 function shouldKeepPlayerBarVisible() {
   return extension_settings[extensionName]?.barPersistent !== false;
@@ -412,16 +413,42 @@ function downloadLastTtsAudio() {
 
 function forceShowPlayerBarElement(bar) {
   if (!bar) return;
-  applyResponsivePlayerBarLayout(bar);
   bar.style.setProperty("display", "flex", "important");
   bar.style.setProperty("visibility", "visible", "important");
   bar.style.setProperty("opacity", "1", "important");
   bar.style.setProperty("pointer-events", "auto", "important");
+  applyResponsivePlayerBarLayout(bar);
 }
 
 function forceHidePlayerBarElement(bar) {
   if (!bar) return;
   bar.style.setProperty("display", "none", "important");
+}
+
+function positionPlayerBarNearAnchor(bar, anchorElement) {
+  if (!bar || !anchorElement || !document.body.contains(anchorElement)) return false;
+  const anchorRect = anchorElement.getBoundingClientRect();
+  const barRect = bar.getBoundingClientRect();
+  const gap = 8;
+  const margin = 8;
+  const barWidth = barRect.width || bar.offsetWidth || 180;
+  const barHeight = barRect.height || bar.offsetHeight || 36;
+  let x = anchorRect.left;
+  let y = anchorRect.bottom + gap;
+
+  if (y + barHeight > window.innerHeight - margin) {
+    y = anchorRect.top - barHeight - gap;
+  }
+
+  x = Math.max(margin, Math.min(x, window.innerWidth - barWidth - margin));
+  y = Math.max(margin, Math.min(y, window.innerHeight - barHeight - margin));
+
+  bar.style.left = `${x}px`;
+  bar.style.top = `${y}px`;
+  bar.style.right = "auto";
+  bar.style.bottom = "auto";
+  bar.style.transform = "none";
+  return true;
 }
 
 function applyResponsivePlayerBarLayout(bar) {
@@ -475,6 +502,9 @@ function applyResponsivePlayerBarLayout(bar) {
     if (closeBtn) {
       closeBtn.style.padding = compact ? "0 2px" : "0 4px";
       closeBtn.style.fontSize = compact ? "14px" : "16px";
+    }
+    if (playerBarAnchorElement && positionPlayerBarNearAnchor(bar, playerBarAnchorElement)) {
+      return;
     }
     return;
   }
@@ -537,6 +567,7 @@ function getTtsAudioEl() {
       const movedEnough = Math.abs(e.clientX - drag.startX) > 4 || Math.abs(e.clientY - drag.startY) > 4;
       if (movedEnough) {
         drag.moved = true;
+        playerBarAnchorElement = null;
         if (drag.fromPlayButton) playButtonWasDragged = true;
         e.preventDefault();
       }
@@ -786,7 +817,7 @@ function updateInlineBarControlsUI(on = shouldKeepPlayerBarVisible()) {
     .toggleClass("tts-inline-active", !!on);
 }
 
-function setPersistentPlayerBarEnabled(on) {
+function setPersistentPlayerBarEnabled(on, anchorElement = null) {
   extension_settings[extensionName].barPersistent = !!on;
   saveSettingsDebounced();
   setBarToggleUI(!!on);
@@ -794,9 +825,12 @@ function setPersistentPlayerBarEnabled(on) {
   const bar = document.getElementById("tts-player-bar");
   if (on) {
     barClosedByUser = false;
+    playerBarDragged = false;
+    playerBarAnchorElement = anchorElement || playerBarAnchorElement;
     ensurePersistentPlayerBar();
   } else {
     barClosedByUser = true;
+    playerBarAnchorElement = null;
     forceHidePlayerBarElement(bar);
   }
 }
@@ -1052,7 +1086,8 @@ function bindPlayButtonDelegation() {
   $(document).on("click", ".tts-bar-toggle-inline-btn", function (e) {
     e.preventDefault();
     e.stopPropagation();
-    setPersistentPlayerBarEnabled(!shouldKeepPlayerBarVisible());
+    const nextOn = !shouldKeepPlayerBarVisible();
+    setPersistentPlayerBarEnabled(nextOn, nextOn ? this : null);
   });
 
   $(document).on("click", ".tts-manual-play-btn", async function (e) {
