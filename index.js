@@ -438,7 +438,7 @@ function applyResponsivePlayerBarLayout(bar) {
   if (dragLabel) dragLabel.style.display = compact ? "none" : "inline";
   if (versionTag) versionTag.style.display = compact ? "none" : "inline";
   if (!playerBarDragged) {
-    bar.style.top = compact ? "50%" : "auto";
+    bar.style.top = compact ? "60%" : "auto";
     bar.style.left = compact ? "10px" : "20px";
     bar.style.right = "auto";
     bar.style.bottom = compact ? "auto" : "calc(92px + env(safe-area-inset-bottom, 0px))";
@@ -771,10 +771,19 @@ function setBarToggleUI(on) {
   const track = document.getElementById("tts-bar-toggle");
   const knob = document.getElementById("tts-bar-knob");
   const state = document.getElementById("tts-bar-toggle-state");
-  if (!track) return;
-  track.style.background = on ? "#3ba55d" : "#777";
-  if (knob) knob.style.left = on ? "22px" : "2px";
-  if (state) state.textContent = on ? "开" : "关";
+  if (track) {
+    track.style.background = on ? "#3ba55d" : "#777";
+    if (knob) knob.style.left = on ? "22px" : "2px";
+    if (state) state.textContent = on ? "开" : "关";
+  }
+  updateInlineBarControlsUI(on);
+}
+
+function updateInlineBarControlsUI(on = shouldKeepPlayerBarVisible()) {
+  $(".tts-bar-toggle-inline-btn")
+    .text(on ? "-" : "+")
+    .attr("title", on ? "隐藏语音进度条" : "显示语音进度条")
+    .toggleClass("tts-inline-active", !!on);
 }
 
 function setPersistentPlayerBarEnabled(on) {
@@ -924,10 +933,10 @@ function injectTTSStyle() {
       display: inline-flex !important;
       align-items: center;
       justify-content: center;
-      min-width: 1.6em;
-      height: 1.6em;
-      margin: 0 6px;
-      font-size: 1.5em;
+      min-width: 1.35em;
+      height: 1.35em;
+      margin: 0;
+      font-size: 1.05em;
       font-weight: bold;
       line-height: 1;
       cursor: pointer;
@@ -937,8 +946,46 @@ function injectTTSStyle() {
       position: relative;
       z-index: 60;
       pointer-events: auto !important;
-      padding: 0 4px;
+      padding: 0 2px;
       transition: color 0.15s, text-shadow 0.15s, transform 0.15s;
+    }
+    .tts-voice-control-group {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 2px;
+      margin-left: 5px;
+      vertical-align: middle;
+      position: relative;
+      z-index: 60;
+      pointer-events: auto !important;
+    }
+    .tts-bar-inline-btn {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.15em;
+      height: 1.15em;
+      border-radius: 4px;
+      padding: 0 2px;
+      color: #9aa0a6;
+      font-size: 0.95em;
+      font-weight: 800;
+      line-height: 1;
+      cursor: pointer;
+      user-select: none;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.18);
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+    .tts-bar-inline-btn:hover {
+      color: #fff;
+      background: rgba(255,255,255,0.16);
+    }
+    .tts-bar-inline-btn.tts-inline-active {
+      color: #00ffae !important;
+      border-color: rgba(0,255,174,0.75);
+      background: rgba(0,255,174,0.16);
+      text-shadow: 0 0 6px rgba(0,255,174,0.75);
     }
     .tts-manual-play-btn:hover { color: #e0e0e0; }
     /* 生成中：荧光黄，符号本身发光 + 跳动 */
@@ -972,20 +1019,27 @@ function setButtonState(button, state) {
 function injectPlayButton() {
   $(".mes").each(function () {
     const messageElement = $(this);
-    if (messageElement.find(".tts-manual-play-btn").length > 0) return;
+    if (messageElement.find(".tts-voice-control-group").length > 0) return;
+    messageElement.find(".tts-manual-play-btn").not(".tts-voice-control-group .tts-manual-play-btn").remove();
 
-    const playBtn = $('<span class="tts-manual-play-btn" title="朗读 / 停止" role="button">▶</span>');
+    const controls = $(
+      '<span class="tts-voice-control-group" title="语音控制">' +
+      '<span class="tts-manual-play-btn" title="朗读 / 停止" role="button">▶</span>' +
+      '<span class="tts-bar-inline-btn tts-bar-toggle-inline-btn" title="显示语音进度条" role="button">+</span>' +
+      '</span>'
+    );
 
     // 放到角色名字「右边」：避开左侧的翻页箭头，避免被它盖住点不到
     const nameText = messageElement.find(".name_text").first();
     if (nameText.length > 0) {
-      nameText.after(playBtn);
+      nameText.after(controls);
     } else {
       let target = messageElement.find(".ch_name").first();
       if (target.length === 0) target = messageElement.find(".mes_block").first();
       if (target.length === 0) target = messageElement;
-      target.append(playBtn);
+      target.append(controls);
     }
+    updateInlineBarControlsUI();
   });
 }
 
@@ -994,6 +1048,12 @@ let playDelegationBound = false;
 function bindPlayButtonDelegation() {
   if (playDelegationBound) return;
   playDelegationBound = true;
+
+  $(document).on("click", ".tts-bar-toggle-inline-btn", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setPersistentPlayerBarEnabled(!shouldKeepPlayerBarVisible());
+  });
 
   $(document).on("click", ".tts-manual-play-btn", async function (e) {
     e.preventDefault();
@@ -1734,9 +1794,6 @@ jQuery(async () => {
 
   // 初始化时给现有消息补上播放按钮
   setTimeout(injectPlayButton, 800);
-
-  // 在设置里加「语音进度条 开/关」开关
-  createBarToggle();
 
   // 播放条：按开关决定是否常驻显示
   const barOn = shouldKeepPlayerBarVisible(); // 默认开

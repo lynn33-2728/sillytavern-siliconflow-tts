@@ -1,214 +1,155 @@
 <div class="siliconflow-extension-settings">
+    <!-- 语音功能（TTS）-->
     <div class="inline-drawer">
         <div class="inline-drawer-header inline-drawer-toggle">
-            <b>硅基语音（TTS）</b>
+            <b>硅基语音功能（TTS）</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
         </div>
-
         <div class="inline-drawer-content" style="display: none;">
-            <div class="sf-settings">
-                <section class="sf-section sf-progress-note">
-                    <small>
-                        • 按住左侧 🔊 拖动进度条位置。<br>
-                        • 部分手机、平板端可能需按【生成测试语音】后再长按/拉拽【下载音频】才出现语音进度条,不出反复尝试。<br>
-                        • ▶ 重听用缓存，不重复扣费。
-                    </small>
-                </section>
-
-                <section class="sf-section">
-                    <h4>1组 API设定</h4>
-                    <div class="sf-help-line">从 <a href="https://siliconflow.cn" target="_blank">硅基流动官网</a> 获取API密钥</div>
-                    <div class="sf-setting-row">
-                        <label for="siliconflow_api_key">API密钥：</label>
-                        <input id="siliconflow_api_key" type="password" placeholder="输入你的硅基流动API密钥" />
-                    </div>
-
-                    <div class="sf-setting-row">
-                        <label for="siliconflow_api_url">API地址：</label>
-                        <input id="siliconflow_api_url" type="text" value="https://api.siliconflow.cn/v1" />
-                    </div>
-                </section> <div class="setting-item button-group">
+            <div class="flex-container">
+                <!-- API设置（从原来的位置移过来）-->
+                <div class="setting-item">
+                    <label for="siliconflow_api_key">API密钥：</label>
+                    <input id="siliconflow_api_key" type="password" placeholder="输入你的硅基流动API密钥" />
+                    <small>从 <a href="https://siliconflow.cn" target="_blank">硅基流动官网</a> 获取API密钥</small>
+                </div>
+                
+                <div class="setting-item">
+                    <label for="siliconflow_api_url">API地址：</label>
+                    <input id="siliconflow_api_url" type="text" value="https://api.siliconflow.cn/v1" />
+                </div>
+                
+                <div class="setting-item button-group">
                     <button id="test_siliconflow_connection" class="menu_button">测试连接</button>
                     <button id="save_siliconflow_settings" class="menu_button">保存设置</button>
                     <span id="connection_status" style="color: red;">未连接</span>
                 </div>
-
-                <section class="sf-section">
-                    <h4>2组 语音设定</h4>
-
-                    <div class="setting-item button-group sf-grid two sf-compact-grid">
-                        <div class="setting-item">
-                            <label for="tts_model">TTS模型</label>
-                            <select id="tts_model">
-                                <option value="FunAudioLLM/CosyVoice2-0.5B">CosyVoice2-0.5B</option>
-                            </select>
-                        </div>
-
-                        <div class="setting-item">
-                            <label for="tts_voice">语音角色</label>
-                            <select id="tts_voice">
-                                <option value="alex">Alex (男声)</option>
-                                <option value="anna">Anna (女声)</option>
-                                <option value="bella">Bella (女声)</option>
-                                <option value="benjamin">Benjamin (男声)</option>
-                                <option value="charles">Charles (男声)</option>
-                                <option value="claire">Claire (女声)</option>
-                                <option value="david">David (男声)</option>
-                                <option value="diana">Diana (女声)</option>
-                            </select>
+                
+                <hr class="sysHR">
+                
+                <!-- 模型选择 -->
+                <div class="setting-item">
+                    <label for="tts_model">TTS模型：</label>
+                    <select id="tts_model">
+                        <option value="FunAudioLLM/CosyVoice2-0.5B">CosyVoice2-0.5B</option>
+                    </select>
+                </div>
+                
+                <!-- 音色选择 -->
+                <div class="setting-item">
+                    <label for="tts_voice">语音角色：</label>
+                    <select id="tts_voice">
+                        <option value="alex">Alex (男声)</option>
+                        <option value="anna">Anna (女声)</option>
+                        <option value="bella">Bella (女声)</option>
+                        <option value="benjamin">Benjamin (男声)</option>
+                        <option value="charles">Charles (男声)</option>
+                        <option value="claire">Claire (女声)</option>
+                        <option value="david">David (男声)</option>
+                        <option value="diana">Diana (女声)</option>
+                    </select>
+                </div>
+                
+                <!-- 语速调整 -->
+                <div class="setting-item">
+                    <label for="tts_speed">语速（0.25-4.0）：</label>
+                    <input type="range" id="tts_speed" min="0.25" max="4" step="0.25" value="1" />
+                    <span id="tts_speed_value">1.0</span>
+                </div>
+                
+                <!-- 音量增益 -->
+                <div class="setting-item">
+                    <label for="tts_gain">音量增益（-10到10）：</label>
+                    <input type="range" id="tts_gain" min="-10" max="10" step="1" value="0" />
+                    <span id="tts_gain_value">0</span>
+                </div>
+                
+                
+                <!-- 自动播放 -->
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="auto_play_audio" checked />
+                        自动朗读角色消息
+                    </label>
+                </div>
+                
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="auto_play_user" />
+                        自动朗读用户消息
+                    </label>
+                </div>
+                
+                <!-- 克隆音色功能 -->
+                <div class="sub-section">
+                    <h4>克隆音色功能</h4>
+                    <div class="setting-item">
+                        <label for="clone_voice_name">音色名称：</label>
+                        <input type="text" id="clone_voice_name" placeholder="例如: my_voice_1" pattern="[a-zA-Z0-9_\-]+" />
+                        <small>只能使用英文字母、数字、下划线和连字符，不超过64字符</small>
+                    </div>
+                    <div class="setting-item">
+                        <label for="clone_voice_text">参考文本：</label>
+                        <input type="text" id="clone_voice_text" placeholder="输入音频＊对应＊的文本内容" />
+                    </div>
+                    <div class="setting-item">
+                        <label for="clone_voice_audio">参考音频：</label>
+                        <input type="file" id="clone_voice_audio" accept="audio/*" />
+                        <small>支持mp3, wav等音频格式，建议5-10秒清晰语音</small>
+                    </div>
+                    <div class="setting-item">
+                        <button id="upload_voice" class="menu_button">上传克隆音色</button>
+                        <button id="refresh_custom_voices" class="menu_button">刷新音色列表</button>
+                    </div>
+                    <div class="setting-item">
+                        <label>已克隆的音色：</label>
+                        <div id="custom_voices_list" style="margin-top: 10px;">
+                            <small>暂无自定义音色</small>
                         </div>
                     </div>
-
-                    <div class="setting-item button-group sf-grid two sf-compact-grid">
-                        <div class="setting-item">
-                            <label for="tts_speed">语速 <span id="tts_speed_value">1.0</span></label>
-                            <input type="range" id="tts_speed" min="0.25" max="4" step="0.01" value="1" />
-                        </div>
-
-                        <div class="setting-item">
-                            <label for="tts_gain">音量大小 <span id="tts_gain_value">0</span></label>
-                            <input type="range" id="tts_gain" min="-10" max="10" step="1" value="0" />
-                        </div>
+                </div>
+                
+                <hr class="sysHR">
+                
+                <!-- 文本截取设置 -->
+                <div class="sub-section">
+                    <h4>文本截取设置</h4>
+                    <div class="setting-item">
+                        <label for="image_text_start">开始标记：</label>
+                        <input type="text" id="image_text_start" placeholder="留空=读全文；多个标记用空格隔开" value="" />
                     </div>
-
-                    <div class="setting-item button-group sf-checkbox-inline-row">
-                        <label class="sf-checkbox-item">
-                            <input type="checkbox" id="auto_play_audio" checked /> 自动朗读角色消息
-                        </label>
-                        <label class="sf-checkbox-item">
-                            <input type="checkbox" id="auto_play_user" /> 自动朗读用户消息
-                        </label>
-                    </div>
-
-                    <div class="sf-subsection">
-                        <h4>文本截取设置</h4>
-                        <div class="setting-item button-group sf-grid two sf-compact-grid">
-                            <div class="setting-item">
-                                <label for="image_text_start">开始标记</label>
-                                <input type="text" id="image_text_start" value="（ 【 &quot;" />
-                            </div>
-
-                            <div class="setting-item">
-                                <label for="image_text_end">结束标记</label>
-                                <input type="text" id="image_text_end" value="） 】 &quot;" />
-                            </div>
-                        </div>
-
-                        <div class="setting-item button-group sf-setting-row sf-limit-row">
-                            <label for="tts_max_read_chars">全文发送上限：</label>
-                            <input type="number" id="tts_max_read_chars" min="0" step="1" placeholder="大于设定字数不发送，留空或0=不限制" />
-                        </div>
-
+                    <div class="setting-item">
+                        <label for="image_text_end">结束标记：</label>
+                        <input type="text" id="image_text_end" placeholder="与开始标记一一对应" value="" />
                         <small>
-                            多组标记时用空格隔开，如：开始填 <code>（ 【 "</code>，结束填 <code>） 】 "</code><br>
-                            提取不到标记内容时，会自动改读整条消息，不会卡住。<br>
-                            全文发送上限,建议填1500,留空或0=不限制。
+                            <b>使用说明</b><br>
+                            1. 自动朗读角色消息：默认开启。角色新回复生成后，会自动合成并尝试播放语音。<br>
+                            2. 自动朗读用户消息：默认关闭。需要朗读自己的消息时再手动打开。<br>
+                            3. 开始/结束标记都留空 = 朗读整条消息；两个框都填引号 = 只朗读引号内对话。<br>
+                            4. 支持多组标记，用空格隔开，例如开始填 <code>（ 【 "</code>，结束填 <code>） 】 "</code>。<br>
+                            5. 提取不到标记内容时，会自动改读整条消息，不会卡住。<br>
+                            <br>
+                            <b style="color: #4dabf7;">🔊 语音进度条</b><br>
+                            &nbsp;&nbsp;&nbsp;• 顶部【🔊 语音进度条】开 = 常驻显示；关 = 平时隐藏，朗读时仍会自动弹出。<br>
+                            &nbsp;&nbsp;&nbsp;• 进度条上的 <b>⋮</b> 可以下载最近一次音频、查看 TTS 日志、重置位置和调播放速度。<br>
+                            &nbsp;&nbsp;&nbsp;• 按住左侧 <b>🔊</b> 可以拖动进度条位置。<br>
+                            &nbsp;&nbsp;&nbsp;• 手机浏览器可能会拦截自动播放：如果只生成了音频但没出声，先点页面一次，或点进度条上的 <b>▶</b> 播放。<br>
+                            &nbsp;&nbsp;&nbsp;• 部分手机端需要长按/拉拽“下载音频”后，系统才会刷新出语音进度条；平板可能要等缓存读取完，再点 <b>▶</b>。<br>
+                            &nbsp;&nbsp;&nbsp;• 每条消息名字旁边的 <b>▶</b> 可以单独朗读那一条，也会复用缓存，不重复扣费。
                         </small>
                     </div>
-                </section>
-
-                <section class="sf-section">
-                    <details class="sf-collapse">           
-                      <summary style="font-size: 1.15em; font-weight: bold;">克隆音色</summary>
-                      <div class="sf-collapse-body">
-                            <div class="setting-item button-group">
-                                <div class="setting-item">
-                                    <label for="clone_voice_name">音色名称</label>
-                                     <small>只能英文字母,数字,下划线,连字符,不超64字符</small>
-                                     <input type="text" id="clone_voice_name" placeholder="例如: my_voice_1" pattern="[a-zA-Z0-9_\-]+" />
-                                </div>
-                            </div>
-
-                            <div class="setting-item">
-                                  <label for="clone_voice_text">参考文本</label>
-                                  <textarea id="clone_voice_text" placeholder="输入音频对应的文本内容"></textarea>
-                            </div>
-
-                            <div class="setting-item">
-                                <label for="clone_voice_audio">参考音频</label>
-                                <input type="file" id="clone_voice_audio" accept="audio/*" />
-                                <small>支持 mp3、wav 等音频格式，建议 5-10 秒清晰语音</small>
-                            </div>
-
-                            <div class="setting-item button-group">
-                                <div class="setting-item">
-                                     <label>已克隆的音色</label>
-                                     <div id="custom_voices_list">
-                                         <small>暂无自定义音色</small>
-                                     </div>
-                                </div>
-                                <button id="upload_voice" class="menu_button">上传克隆音色</button>
-                                <button id="refresh_custom_voices" class="menu_button">刷新音色列表</button>
-                            </div>
-                        </div>
-                    </details>
-
-                    <div class="sf-subsection">
-                        <h4>TTS测试</h4>
-                        <div class="setting-item">
-                            <textarea id="tts_test_text" placeholder="输入测试文本...">你好，这是一个测试语音。</textarea>
-                            <button id="test_tts" class="menu_button sf-test-button">生成测试语音</button>
-                            <div id="tts_output"></div>
-                        </div>
+                </div>
+                
+                <!-- TTS测试 -->
+                <div class="sub-section">
+                    <h4>TTS测试</h4>
+                    <div class="setting-item">
+                        <textarea id="tts_test_text" placeholder="输入测试文本...">你好，这是一个测试语音。</textarea>
+                        <button id="test_tts" class="menu_button">生成测试语音</button>
+                        <div id="tts_output"></div>
                     </div>
-                </section>
-
-                <input type="hidden" id="response_format" value="mp3" />
-                <input type="hidden" id="sample_rate" value="32000" />
-                <input type="hidden" id="image_size" value="512" />
-                <input type="hidden" id="generation_frequency" value="5" />
+                </div>
             </div>
         </div>
     </div>
 </div>
-
-<style>
-/* 1. 让API密钥和地址变成酒馆同款的紧凑对齐 */
-.sf-setting-row {
-    display: flex;
-    align-items: center;
-    margin-bottom: 12px;
-    width: 100%;
-}
-
-/* 固定左边文字的宽度，并让文字右对齐，这样冒号就能完美对齐 */
-.sf-setting-row label {
-    width: 90px;          /* 如果觉得文字和框太近或太远，可以微调这个数字 */
-    text-align: right;    /* 文字靠右对齐 */
-    margin-bottom: 0 !important;
-    white-space: nowrap;
-    margin-right: 10px;   /* 文字和输入框之间的固定间距 */
-}
-
-/* 让输入框自动填满剩下的右侧空间，但保持紧凑 */
-.sf-setting-row input {
-    flex-grow: 1;
-}
-
-/* 2. 让测试连接和保存设置两个按钮平分并排（保持不变） */
-.sf-actions-row {
-    display: flex;
-    gap: 10px;
-    margin-top: 15px;
-}
-.sf-actions-row .menu_button {
-    flex: 1;
-    margin: 0 !important;
-}
-
-/* 3. 让自动朗读的多选框左右并排（保持不变） */
-.sf-checkbox-inline-row {
-    display: flex;
-    gap: 20px;
-    margin: 15px 0;
-}
-.sf-checkbox-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-}
-.sf-checkbox-item input[type="checkbox"] {
-    margin: 0 !important;
-}
-</style>
