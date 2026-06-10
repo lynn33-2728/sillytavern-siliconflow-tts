@@ -438,11 +438,11 @@ function applyResponsivePlayerBarLayout(bar) {
   if (dragLabel) dragLabel.style.display = compact ? "none" : "inline";
   if (versionTag) versionTag.style.display = compact ? "none" : "inline";
   if (!playerBarDragged) {
-    bar.style.top = "auto";
+    bar.style.top = compact ? "50%" : "auto";
     bar.style.left = compact ? "10px" : "20px";
     bar.style.right = "auto";
-    bar.style.bottom = compact ? "calc(74px + env(safe-area-inset-bottom, 0px))" : "calc(92px + env(safe-area-inset-bottom, 0px))";
-    bar.style.transform = "none";
+    bar.style.bottom = compact ? "auto" : "calc(92px + env(safe-area-inset-bottom, 0px))";
+    bar.style.transform = compact ? "translateY(-50%)" : "none";
     bar.style.width = "auto";
     bar.style.maxWidth = compact ? "calc(100vw - 20px)" : "calc(100vw - 40px)";
     bar.style.boxSizing = "border-box";
