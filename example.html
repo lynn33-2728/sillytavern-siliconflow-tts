@@ -79,6 +79,19 @@
                         </label>
                     </div>
 
+                    <details class="sf-collapse sf-role-voices-collapse">
+                        <summary style="font-size: 1.05em; font-weight: bold;">多人角色音色</summary>
+                        <div class="sf-collapse-body">
+                            <div class="setting-item button-group sf-role-voice-tools">
+                                <small>群聊里会按消息名字匹配音色；没设置的角色使用上面的默认语音角色。</small>
+                                <button id="refresh_role_voices" class="menu_button" type="button">刷新当前聊天角色</button>
+                            </div>
+                            <div id="tts_role_voice_map" class="sf-role-voice-map">
+                                <small>打开角色聊天页后点“刷新当前聊天角色”。</small>
+                            </div>
+                        </div>
+                    </details>
+
                     <div class="sf-subsection">
                         <h4>文本截取设置</h4>
                         <div class="setting-item button-group sf-grid two sf-compact-grid">
@@ -284,5 +297,31 @@
     background: rgba(18, 18, 18, 0.58) !important;
     border: 1px solid rgba(255, 255, 255, 0.72) !important;
     color: var(--SmartThemeBodyColor, #fff) !important;
+}
+.siliconflow-extension-settings .sf-role-voices-collapse {
+    margin: 8px 0 10px;
+}
+.siliconflow-extension-settings .sf-role-voice-tools {
+    align-items: center;
+    gap: 8px;
+}
+.siliconflow-extension-settings .sf-role-voice-tools small {
+    flex: 1 1 220px;
+}
+.siliconflow-extension-settings .sf-role-voice-row {
+    display: grid !important;
+    grid-template-columns: minmax(90px, 0.55fr) minmax(150px, 1fr);
+    gap: 8px;
+    align-items: center;
+    margin: 4px 0;
+}
+.siliconflow-extension-settings .sf-role-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+}
+.siliconflow-extension-settings .tts-role-voice-select {
+    width: 100%;
 }
 </style>

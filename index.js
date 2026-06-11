@@ -89,6 +89,7 @@ const defaultSettings = {
   barPersistent: true,
   playerBarSize: "small",
   ttsPlaybackRate: 1.0,
+  roleVoiceMap: {},
   customVoices: [] // 存储自定义音色列表
 };
 
@@ -265,6 +266,82 @@ function updateVoiceOptions() {
   } else {
     voiceSelect.val(extension_settings[extensionName].ttsVoice || Object.keys(TTS_MODELS[model]?.voices || {})[0]);
   }
+  renderRoleVoiceMap();
+}
+
+function escapeHtml(text) {
+  return String(text || "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
+function getAllVoiceOptions() {
+  const model = $("#tts_model").val() || extension_settings[extensionName]?.ttsModel || defaultSettings.ttsModel;
+  const options = [];
+  if (TTS_MODELS[model]?.voices) {
+    Object.entries(TTS_MODELS[model].voices).forEach(([value, label]) => options.push({ value, label }));
+  }
+  (extension_settings[extensionName]?.customVoices || []).forEach(voice => {
+    const label = voice.name || voice.customName || voice.custom_name || "未命名";
+    const value = voice.uri || voice.id || voice.voice_id;
+    if (value) options.push({ value, label: `${label} (自定义)` });
+  });
+  return options;
+}
+
+function collectCurrentChatSpeakers() {
+  const context = getContext();
+  const chat = Array.isArray(context?.chat) ? context.chat : [];
+  const names = [];
+  chat.forEach(message => {
+    if (!message || message.is_user) return;
+    const name = String(message.name || message.extra?.display_name || "").trim();
+    if (name && !names.includes(name)) names.push(name);
+  });
+  $(".mes").each(function () {
+    const name = $(this).find(".name_text").first().text().trim();
+    if (name && !names.includes(name)) names.push(name);
+  });
+  return names;
+}
+
+function renderRoleVoiceMap(names = collectCurrentChatSpeakers()) {
+  const container = $("#tts_role_voice_map");
+  if (container.length === 0) return;
+  const roleVoiceMap = extension_settings[extensionName].roleVoiceMap || {};
+  const voiceOptions = getAllVoiceOptions();
+  if (!names.length) {
+    container.html('<small>当前聊天还没有读到角色消息。打开角色聊天页后点“刷新当前聊天角色”。</small>');
+    return;
+  }
+  const optionHtml = (selected) => [
+    '<option value="">使用默认语音角色</option>',
+    ...voiceOptions.map(opt => `<option value="${escapeHtml(opt.value)}"${opt.value === selected ? " selected" : ""}>${escapeHtml(opt.label)}</option>`),
+  ].join("");
+  container.html(names.map(name => `
+    <div class="setting-item button-group sf-role-voice-row" data-role-name="${escapeHtml(name)}">
+      <span class="sf-role-name">${escapeHtml(name)}</span>
+      <select class="tts-role-voice-select">${optionHtml(roleVoiceMap[name] || "")}</select>
+    </div>
+  `).join(""));
+}
+
+function getMessageSpeakerName(messageElement) {
+  const mesId = Number.parseInt(messageElement.attr("mesid"), 10);
+  const context = getContext();
+  const message = Number.isFinite(mesId) ? context?.chat?.[mesId] : null;
+  return String(message?.name || message?.extra?.display_name || messageElement.find(".name_text").first().text() || "").trim();
+}
+
+function getVoiceForSpeaker(speakerName) {
+  const fallback = $("#tts_voice").val() || extension_settings[extensionName].ttsVoice || defaultSettings.ttsVoice;
+  if (!speakerName) return fallback;
+  const mapped = extension_settings[extensionName].roleVoiceMap?.[speakerName];
+  return mapped || fallback;
 }
 
 // 保存设置
@@ -326,7 +403,7 @@ async function testConnection() {
 }
 
 // TTS功能
-async function generateTTS(text, buttonElement = null) {
+async function generateTTS(text, buttonElement = null, voiceOverride = null) {
   const apiKey = extension_settings[extensionName].apiKey;
   
   if (!apiKey) {
@@ -350,11 +427,16 @@ async function generateTTS(text, buttonElement = null) {
     setButtonState(buttonElement, "loading");
   }
 
-  // 命中缓存：直接播放，不再请求 API（不扣费）
-  if (ttsAudioCache.has(text)) {
+  const voiceValue = voiceOverride || $("#tts_voice").val() || "alex";
+  const speed = parseFloat($("#tts_speed").val()) || 1.0;
+  const gain = parseFloat($("#tts_gain").val()) || 0;
+  const cacheKey = JSON.stringify({ text, voice: voiceValue, speed, gain });
+
+  // 命中缓存：同一段文字 + 同一音色 + 同一语速音量，直接播放，不再请求 API（不扣费）
+  if (ttsAudioCache.has(cacheKey)) {
     ttsLog("② 命中缓存，直接播放（不扣费）");
-    playAudioUrl(ttsAudioCache.get(text), buttonElement);
-    return ttsAudioCache.get(text);
+    playAudioUrl(ttsAudioCache.get(cacheKey), buttonElement);
+    return ttsAudioCache.get(cacheKey);
   }
   
   try {
@@ -368,10 +450,6 @@ async function generateTTS(text, buttonElement = null) {
       toastr.info(`文本较长，已截断到 ${MAX_LEN} 字朗读`, "TTS");
     }
 
-    const voiceValue = $("#tts_voice").val() || "alex";
-    const speed = parseFloat($("#tts_speed").val()) || 1.0;
-    const gain = parseFloat($("#tts_gain").val()) || 0;
-    
     let voiceParam;
     if (voiceValue.startsWith("speech:")) {
       voiceParam = voiceValue;
@@ -426,7 +504,7 @@ async function generateTTS(text, buttonElement = null) {
     ttsLog("⑤ 拿到音频 " + (audioBlob.size / 1024).toFixed(1) + " KB");
 
     // 存入缓存，下次同一段文字直接放，不再扣费
-    ttsAudioCache.set(text, audioUrl);
+    ttsAudioCache.set(cacheKey, audioUrl);
 
     playAudioUrl(audioUrl, buttonElement);
 
@@ -1312,7 +1390,10 @@ function bindPlayButtonDelegation() {
       }
       ttsLog("✂ 最终朗读文本 " + textToRead.length + " 字");
 
-      await generateTTS(textToRead, playBtn);
+      const speakerName = getMessageSpeakerName(messageElement);
+      const voiceForSpeaker = getVoiceForSpeaker(speakerName);
+      if (speakerName) ttsLog("🎭 说话人：" + speakerName + "，音色=" + voiceForSpeaker);
+      await generateTTS(textToRead, playBtn, voiceForSpeaker);
     } catch (err) {
       ttsLog("❌ 点击处理异常：" + (err && err.message ? err.message : err));
       resetPlayState();
@@ -1568,7 +1649,10 @@ function setupMessageListener() {
         return;
       }
       console.log('自动朗读最终文本:', textToRead.substring(0, 100));
-      generateTTS(textToRead);
+      const speakerName = getMessageSpeakerName(messageElement);
+      const voiceForSpeaker = getVoiceForSpeaker(speakerName);
+      if (speakerName) ttsLog("🎭 自动朗读说话人：" + speakerName + "，音色=" + voiceForSpeaker);
+      generateTTS(textToRead, null, voiceForSpeaker);
       return;
       
       const textStart = $("#image_text_start").val();
@@ -2147,6 +2231,19 @@ jQuery(async () => {
   $("#tts_voice").on("change", function() {
     extension_settings[extensionName].ttsVoice = $(this).val();
     console.log("选择的音色:", $(this).val());
+    renderRoleVoiceMap();
+  });
+  $("#refresh_role_voices").on("click", function() {
+    renderRoleVoiceMap();
+    toastr.success("已刷新当前聊天角色", "多人音色");
+  });
+  $(document).on("change", ".tts-role-voice-select", function() {
+    const roleName = $(this).closest(".sf-role-voice-row").data("role-name");
+    const voice = $(this).val();
+    extension_settings[extensionName].roleVoiceMap = extension_settings[extensionName].roleVoiceMap || {};
+    if (voice) extension_settings[extensionName].roleVoiceMap[roleName] = voice;
+    else delete extension_settings[extensionName].roleVoiceMap[roleName];
+    saveSettingsDebounced();
   });
   $("#tts_speed").on("input", function() {
     $("#tts_speed_value").text($(this).val());
