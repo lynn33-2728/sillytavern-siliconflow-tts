@@ -29,7 +29,7 @@ function ttsLog(msg) {
     panel = document.createElement("div");
     panel.id = "tts-log-panel";
     panel.style.cssText =
-      "position:fixed;left:6px;right:6px;bottom:120px;z-index:100000;max-height:32vh;overflow-y:auto;" +
+      "position:fixed;left:6px;right:6px;bottom:120px;z-index:100500;max-height:32vh;overflow-y:auto;" +
       "background:rgba(0,0,0,0.88);color:#00ff7f;font-size:11px;line-height:1.5;padding:0;border-radius:8px;" +
       "font-family:monospace;white-space:pre-wrap;display:none;box-shadow:0 2px 12px rgba(0,0,0,0.6);";
     const head = document.createElement("div");
@@ -79,6 +79,10 @@ const defaultSettings = {
   imageSize: "512",
   textStart: "（",
   textEnd: "）",
+  extraTextRulesEnabled: false,
+  skipTagPairs: [],
+  readTagPairs: [],
+  readUntaggedWithRequired: false,
   generationFrequency: 5,
   autoPlay: true,
   autoPlayUser: false,
@@ -105,6 +109,85 @@ const TTS_MODELS = {
   }
 };
 
+function normalizeTagPairs(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(pair => ({
+      start: String(pair?.start || "").trim(),
+      end: String(pair?.end || "").trim(),
+      enabled: pair?.enabled !== false,
+    }))
+    .filter(pair => pair.start && pair.end);
+}
+
+function getEnabledTagPairs(value) {
+  return normalizeTagPairs(value).filter(pair => pair.enabled !== false);
+}
+
+function makeEndTagFromStart(startTag) {
+  const tag = String(startTag || "").trim();
+  if (!tag) return "";
+  const match = tag.match(/^<\s*([^\s>/]+)[^>]*>$/);
+  if (match) return `</${match[1]}>`;
+  if (tag.startsWith("<") && !tag.startsWith("</")) return tag.replace(/^<\s*/, "</");
+  return "";
+}
+
+function getTagPairSettingKey(kind) {
+  return kind === "skip" ? "skipTagPairs" : "readTagPairs";
+}
+
+function collectTagPairSettings(kind) {
+  const pairs = [];
+  $(`.tts-tag-pair-row[data-kind="${kind}"]`).each(function () {
+    const start = $(this).find(".tts-tag-start").val().trim();
+    const end = $(this).find(".tts-tag-end").val().trim();
+    const enabled = $(this).find(".tts-tag-enabled").prop("checked") !== false;
+    if (start || end) pairs.push({ start, end: end || makeEndTagFromStart(start), enabled });
+  });
+  return normalizeTagPairs(pairs);
+}
+
+function addTagPairRow(kind, pair = {}) {
+  const container = $(`#tts_${kind}_tag_pairs`);
+  if (container.length === 0) return;
+  const row = $(`
+    <div class="setting-item button-group tts-tag-pair-row" data-kind="${kind}">
+      <span class="tts-tag-status ${kind === "skip" ? "tts-tag-skip" : "tts-tag-read"}">${kind === "skip" ? "×" : "✓"}</span>
+      <label class="tts-tag-enabled-label"><input type="checkbox" class="tts-tag-enabled" title="启用这一组" checked><span>启用</span></label>
+      <label>开始:<input type="text" class="tts-tag-start" placeholder="<think>"></label>
+      <label>结束:<input type="text" class="tts-tag-end" placeholder="</think>"></label>
+      <span class="tts-tag-preview"></span>
+      <button type="button" class="menu_button tts-tag-remove" title="删除这一组">-</button>
+    </div>
+  `);
+  row.find(".tts-tag-start").val(pair.start || "");
+  row.find(".tts-tag-end").val(pair.end || makeEndTagFromStart(pair.start));
+  row.find(".tts-tag-enabled").prop("checked", pair.enabled !== false);
+  row.attr("data-auto-end", makeEndTagFromStart(pair.start));
+  container.append(row);
+  updateTagPairPreview(row);
+}
+
+function updateTagPairPreview(row) {
+  const start = row.find(".tts-tag-start").val().trim();
+  const end = row.find(".tts-tag-end").val().trim();
+  row.find(".tts-tag-preview").text(start && end ? `${start}  ${end}` : "");
+}
+
+function renderTagPairSettings(kind) {
+  const container = $(`#tts_${kind}_tag_pairs`);
+  if (container.length === 0) return;
+  container.empty();
+  const pairs = normalizeTagPairs(extension_settings[extensionName][getTagPairSettingKey(kind)]);
+  pairs.forEach(pair => addTagPairRow(kind, pair));
+}
+
+function updateExtraTextRulesUI(enabled = extension_settings[extensionName]?.extraTextRulesEnabled === true) {
+  $("#tts_enable_extra_text_rules").prop("checked", !!enabled);
+  $(".sf-extra-text-rules-body").toggle(!!enabled);
+}
+
 // 加载设置
 async function loadSettings() {
   extension_settings[extensionName] = extension_settings[extensionName] || {};
@@ -112,6 +195,11 @@ async function loadSettings() {
   if (Object.keys(extension_settings[extensionName]).length === 0) {
     Object.assign(extension_settings[extensionName], defaultSettings);
   }
+  Object.keys(defaultSettings).forEach((key) => {
+    if (extension_settings[extensionName][key] === undefined) {
+      extension_settings[extensionName][key] = defaultSettings[key];
+    }
+  });
 
   // 更新UI
   $("#siliconflow_api_key").val(extension_settings[extensionName].apiKey || "");
@@ -130,6 +218,11 @@ async function loadSettings() {
   $("#generation_frequency").val(extension_settings[extensionName].generationFrequency || defaultSettings.generationFrequency);
   $("#auto_play_audio").prop("checked", extension_settings[extensionName].autoPlay !== false);
   $("#auto_play_user").prop("checked", extension_settings[extensionName].autoPlayUser === true);
+  $("#tts_enable_extra_text_rules").prop("checked", extension_settings[extensionName].extraTextRulesEnabled === true);
+  $("#tts_read_untagged_with_required").prop("checked", extension_settings[extensionName].readUntaggedWithRequired === true);
+  renderTagPairSettings("skip");
+  renderTagPairSettings("read");
+  updateExtraTextRulesUI();
   
   updateVoiceOptions();
 }
@@ -187,6 +280,10 @@ function saveSettings() {
   extension_settings[extensionName].imageSize = $("#image_size").val();
   extension_settings[extensionName].textStart = $("#image_text_start").val();
   extension_settings[extensionName].textEnd = $("#image_text_end").val();
+  extension_settings[extensionName].extraTextRulesEnabled = $("#tts_enable_extra_text_rules").prop("checked") === true;
+  extension_settings[extensionName].skipTagPairs = collectTagPairSettings("skip");
+  extension_settings[extensionName].readTagPairs = collectTagPairSettings("read");
+  extension_settings[extensionName].readUntaggedWithRequired = $("#tts_read_untagged_with_required").prop("checked") === true;
   extension_settings[extensionName].generationFrequency = parseInt($("#generation_frequency").val());
   extension_settings[extensionName].autoPlay = $("#auto_play_audio").prop("checked");
   extension_settings[extensionName].autoPlayUser = $("#auto_play_user").prop("checked");
@@ -415,6 +512,10 @@ function setTtsPlaybackRate(rate) {
   document.querySelectorAll(".tts-speed-item").forEach((item) => {
     item.style.color = Number(item.dataset.rate) === safeRate ? "#ffd54a" : "#fff";
   });
+  const speedRange = document.getElementById("tts-player-speed-range");
+  const speedValue = document.getElementById("tts-player-speed-value");
+  if (speedRange) speedRange.value = String(safeRate);
+  if (speedValue) speedValue.textContent = `${safeRate.toFixed(2)}x`;
 }
 
 function downloadLastTtsAudio() {
@@ -428,6 +529,46 @@ function downloadLastTtsAudio() {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+function openSiliconflowSettingsPanel() {
+  const openCandidates = [
+    "#extensions_button",
+    "#extensions_settings_button",
+    "#rm_extensions_block .drawer-toggle",
+    ".drawer-icon[data-drawer='extensions']",
+    ".drawer-toggle[data-drawer='extensions']",
+    "[title='扩展程序']",
+    "[title='Extensions']",
+  ];
+  for (const selector of openCandidates) {
+    const button = document.querySelector(selector);
+    if (button && button.offsetParent !== null) {
+      button.click();
+      break;
+    }
+  }
+
+  const root = $(".siliconflow-extension-settings").first();
+  if (root.length === 0) {
+    toastr.warning("还没有找到硅基语音设置面板。", "TTS");
+    return;
+  }
+  const reveal = () => {
+    const drawer = root.find(".inline-drawer-content").first();
+    const icon = root.find(".inline-drawer-icon").first();
+    root.show();
+    root.parents().each(function () {
+      const el = this;
+      if (el && el.style && getComputedStyle(el).display === "none") el.style.display = "";
+    });
+    drawer.data("open", true).show();
+    icon.addClass("down");
+    root[0].scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  reveal();
+  setTimeout(reveal, 250);
+  setTimeout(reveal, 700);
 }
 
 function forceShowPlayerBarElement(bar) {
@@ -700,6 +841,7 @@ function getTtsAudioEl() {
     const menu = document.createElement("div");
     menu.id = "tts-bar-menu";
     menu.style.cssText = "position:absolute;bottom:110%;right:6px;background:#222;border:1px solid #555;border-radius:8px;padding:6px 0;display:none;min-width:150px;box-shadow:0 2px 12px rgba(0,0,0,0.7);z-index:100001;";
+    menu.addEventListener("click", (e) => e.stopPropagation());
     const makeMenuItem = (text, onClick, className = "") => {
       const item = document.createElement("div");
       item.textContent = text;
@@ -721,6 +863,12 @@ function getTtsAudioEl() {
       const panel = document.getElementById("tts-log-panel");
       if (panel) {
         const hidden = (panel.style.display === "none" || !panel.style.display);
+        if (hidden) {
+          const rect = bar.getBoundingClientRect();
+          const bottom = Math.max(8, window.innerHeight - rect.top + 10);
+          panel.style.bottom = `${bottom}px`;
+          panel.style.zIndex = "100500";
+        }
         panel.style.display = hidden ? "block" : "none";
       }
       menu.style.display = "none";
@@ -748,19 +896,30 @@ function getTtsAudioEl() {
     sizeToggleItem.id = "tts-player-size-toggle";
     menu.appendChild(sizeToggleItem);
 
+    const settingsItem = makeMenuItem("设置", () => {
+      openSiliconflowSettingsPanel();
+      menu.style.display = "none";
+    });
+    menu.appendChild(settingsItem);
+
     const speedTitle = document.createElement("div");
-    speedTitle.textContent = "播放速度";
     speedTitle.style.cssText = "color:#aaa;padding:8px 14px 4px;font-size:12px;white-space:nowrap;border-top:1px solid rgba(255,255,255,0.14);margin-top:4px;";
+    speedTitle.innerHTML = '播放速度 <span id="tts-player-speed-value" style="color:#fff;">1.00x</span>';
     menu.appendChild(speedTitle);
 
-    [0.75, 1, 1.25, 1.5, 2].forEach((rate) => {
-      const item = makeMenuItem(`${rate}x`, () => {
-        setTtsPlaybackRate(rate);
-        menu.style.display = "none";
-      }, "tts-speed-item");
-      item.dataset.rate = String(rate);
-      menu.appendChild(item);
-    });
+    const speedControl = document.createElement("div");
+    speedControl.style.cssText = "padding:4px 14px 12px;";
+    const speedRange = document.createElement("input");
+    speedRange.id = "tts-player-speed-range";
+    speedRange.type = "range";
+    speedRange.min = "0.5";
+    speedRange.max = "2";
+    speedRange.step = "0.01";
+    speedRange.value = String(extension_settings[extensionName].ttsPlaybackRate || 1);
+    speedRange.style.cssText = "width:160px;margin:0;";
+    speedRange.addEventListener("input", () => setTtsPlaybackRate(parseFloat(speedRange.value)));
+    speedControl.appendChild(speedRange);
+    menu.appendChild(speedControl);
     setTtsPlaybackRate(extension_settings[extensionName].ttsPlaybackRate || 1);
 
     menuBtn.addEventListener("click", (e) => {
@@ -927,10 +1086,10 @@ function primeAudioOnce() {
   } catch (e) {}
 }
 
-// 实际播放一个音频URL：显示底部播放条 + 尝试自动播放；被拦时用户点原生键必响
+// 实际播放一个音频URL：头像旁 ▶ 只负责播放，不主动弹出进度条；需要进度条时点消息旁的 +。
 function playAudioUrl(audioUrl, buttonElement) {
-  ttsLog("⑥ 显示播放条并尝试播放");
-  const audio = showPlayerBar();
+  ttsLog("⑥ 尝试播放音频");
+  const audio = getTtsAudioEl();
   try { audio.pause(); } catch (e) {}
 
   lastTtsAudioUrl = audioUrl;
@@ -966,9 +1125,9 @@ function playAudioUrl(audioUrl, buttonElement) {
     ttsLog("✅ 自动播放成功，应该有声音了");
     if (audioState.playingButton) setButtonState(audioState.playingButton, "playing");
   }).catch(err => {
-    ttsLog("⚠️ 自动播放被拦，请点底部播放条的 ▶。原因：" + (err && err.message ? err.message : err));
+    ttsLog("⚠️ 自动播放被拦，请点消息旁的 + 打开进度条，再点进度条里的 ▶。原因：" + (err && err.message ? err.message : err));
     if (audioState.playingButton) setButtonState(audioState.playingButton, "playing");
-    toastr.info('点击下方播放条的 ▶ 即可收听', 'TTS', { timeOut: 4000 });
+    toastr.info('如未出声，点消息旁的 + 打开进度条，再点进度条里的 ▶', 'TTS', { timeOut: 5000 });
   });
 }
 
@@ -1137,10 +1296,7 @@ function bindPlayButtonDelegation() {
         return;
       }
 
-      let messageText = messageElement.find(".mes_text").text().trim();
-      if (!messageText) {
-        messageText = messageElement.find(".mes_reasoning_content, .mes_reasoning, .mes_block").text().trim();
-      }
+      let messageText = getMessageSourceText(messageElement);
       if (!messageText) {
         ttsLog("❌ 这条消息读不到文字（空/折叠块）");
         toastr.warning("这条消息没有可朗读的文字，换一条角色回复试试。", "TTS");
@@ -1148,13 +1304,13 @@ function bindPlayButtonDelegation() {
       }
       ttsLog("原文长度 " + messageText.length);
 
-      let textToRead = extractMarkedText(messageText);
-      if (textToRead) {
-        ttsLog("✂ 按标记截取到 " + textToRead.length + " 字");
-      } else {
-        ttsLog("⚠ 未截取到标记内文字 → 读全文（可能很长）");
-        textToRead = messageText;
+      let textToRead = prepareTextForTts(messageText);
+      if (!textToRead) {
+        ttsLog("⚠ 额外提取规则过滤后没有可朗读文字");
+        toastr.warning("这条消息按当前标签规则没有可朗读内容。", "TTS");
+        return;
       }
+      ttsLog("✂ 最终朗读文本 " + textToRead.length + " 字");
 
       await generateTTS(textToRead, playBtn);
     } catch (err) {
@@ -1171,6 +1327,110 @@ function normalizeQuotes(s) {
   return s
     .replace(/[\u201C\u201D\u201E\u201F\u2033\u3003\uFF02]/g, '"')   // “ ” „ ‟ ″ 〃 ＂ → "
     .replace(/[\u2018\u2019\u201A\u201B\u2032\uFF07]/g, "'");        // ‘ ’ ‚ ‛ ′ ＇ → '
+}
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findTagBlocks(message, pairs) {
+  const blocks = [];
+  getEnabledTagPairs(pairs).forEach(pair => {
+    const startMatch = pair.start.match(/^<\s*([^\s>/]+)[^>]*>$/);
+    const endMatch = pair.end.match(/^<\s*\/\s*([^\s>]+)\s*>$/);
+    const startPattern = startMatch ? `<\\s*${escapeRegex(startMatch[1])}(?:\\s[^>]*)?>` : escapeRegex(pair.start);
+    const endPattern = endMatch ? `<\\s*\\/\\s*${escapeRegex(endMatch[1])}\\s*>` : escapeRegex(pair.end);
+    const re = new RegExp(startPattern + "([\\s\\S]*?)" + endPattern, "gi");
+    let match;
+    while ((match = re.exec(message)) !== null) {
+      blocks.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        text: match[1].trim(),
+      });
+    }
+  });
+  return blocks.sort((a, b) => a.start - b.start);
+}
+
+function removeRanges(message, ranges) {
+  if (!ranges.length) return message;
+  let result = "";
+  let cursor = 0;
+  ranges.sort((a, b) => a.start - b.start).forEach(range => {
+    if (range.start < cursor) return;
+    result += message.slice(cursor, range.start);
+    cursor = range.end;
+  });
+  result += message.slice(cursor);
+  return result;
+}
+
+function textOutsideRanges(message, ranges) {
+  return removeRanges(message, ranges)
+    .replace(/<([A-Za-z][\w:-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .trim();
+}
+
+function normalizeTtsWhitespace(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function decodeHtmlEntities(text) {
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = String(text || "");
+  return textarea.value;
+}
+
+function getMessageSourceText(messageElement) {
+  const mainText = messageElement.find(".mes_text").first();
+  if (extension_settings[extensionName].extraTextRulesEnabled === true && mainText.length > 0) {
+    const html = mainText.html() || "";
+    return decodeHtmlEntities(html.replace(/<br\s*\/?>/gi, "\n")).trim();
+  }
+  let text = mainText.text().trim();
+  if (!text) {
+    text = messageElement.find(".mes_reasoning_content, .mes_reasoning, .mes_block").text().trim();
+  }
+  return text;
+}
+
+function applyExtraTagExtraction(message) {
+  if (extension_settings[extensionName].extraTextRulesEnabled !== true) {
+    return normalizeTtsWhitespace(message);
+  }
+  const skipPairs = getEnabledTagPairs(extension_settings[extensionName].skipTagPairs);
+  const readPairs = getEnabledTagPairs(extension_settings[extensionName].readTagPairs);
+  const includeUntagged = extension_settings[extensionName].readUntaggedWithRequired === true;
+  let working = String(message || "");
+
+  const skipBlocks = findTagBlocks(working, skipPairs);
+  if (skipBlocks.length > 0) {
+    working = removeRanges(working, skipBlocks);
+  }
+
+  if (readPairs.length === 0) {
+    return normalizeTtsWhitespace(working);
+  }
+
+  const readBlocks = findTagBlocks(working, readPairs);
+  const parts = readBlocks.map(block => block.text).filter(Boolean);
+  if (includeUntagged) {
+    const outsideText = textOutsideRanges(working, readBlocks);
+    if (outsideText) parts.push(outsideText);
+  }
+  return normalizeTtsWhitespace(parts.join(" "));
+}
+
+function prepareTextForTts(message) {
+  const filteredText = applyExtraTagExtraction(message);
+  if (!filteredText) return "";
+  const markedText = extractMarkedText(filteredText);
+  if (extension_settings[extensionName].extraTextRulesEnabled === true && getEnabledTagPairs(extension_settings[extensionName].readTagPairs).length > 0) {
+    return normalizeTtsWhitespace(markedText);
+  }
+  return normalizeTtsWhitespace(markedText || filteredText);
 }
 
 function extractMarkedText(message) {
@@ -1192,12 +1452,14 @@ function extractMarkedText(message) {
 
   for (let p = 0; p < pairCount; p++) {
     const s = starts[p], e = ends[p];
-    if (s === e) {
+    const quoteLike = (s === '"' || e === '"' || s === "'" || e === "'");
+    if (quoteLike || s === e) {
       // 起止相同（如引号）：用配对算法
       let inside = false, cur = "", startPos = -1;
       for (let i = 0; i < message.length; i++) {
         const ch = message[i];
-        if (ch === s) {
+        const isMarker = quoteLike ? (ch === s || ch === e) : ch === s;
+        if (isMarker) {
           if (!inside) { inside = true; cur = ""; startPos = i; }
           else { if (cur.trim()) found.push({ pos: startPos, text: cur.trim() }); inside = false; cur = ""; }
         } else if (inside) { cur += ch; }
@@ -1292,13 +1554,22 @@ function setupMessageListener() {
       const messageElement = $(`.mes[mesid="${messageId}"]`);
       console.log('查找消息元素:', messageElement.length > 0 ? '找到' : '未找到');
       
-      const message = messageElement.find('.mes_text').text();
+      const message = getMessageSourceText(messageElement);
       console.log('消息内容长度:', message ? message.length : 0);
       
       if (!message) {
         console.log('消息内容为空');
         return;
       }
+
+      const textToRead = prepareTextForTts(message);
+      if (!textToRead) {
+        console.log('按当前标签/标记规则没有可朗读内容，跳过自动朗读');
+        return;
+      }
+      console.log('自动朗读最终文本:', textToRead.substring(0, 100));
+      generateTTS(textToRead);
+      return;
       
       const textStart = $("#image_text_start").val();
       const textEnd = $("#image_text_end").val();
@@ -1412,12 +1683,21 @@ function setupMessageListener() {
       const messageElement = $(`.mes[mesid="${messageId}"]`);
       console.log('用户消息元素:', messageElement.length > 0 ? '找到' : '未找到');
       
-      const message = messageElement.find('.mes_text').text();
+      const message = getMessageSourceText(messageElement);
       console.log('用户消息内容长度:', message ? message.length : 0);
       if (!message) {
         console.log('用户消息内容为空');
         return;
       }
+
+      const textToRead = prepareTextForTts(message);
+      if (!textToRead) {
+        console.log('用户消息按当前标签/标记规则没有可朗读内容，跳过自动朗读');
+        return;
+      }
+      console.log('用户消息自动朗读最终文本:', textToRead.substring(0, 100));
+      generateTTS(textToRead);
+      return;
       
       const textStart = $("#image_text_start").val();
       const textEnd = $("#image_text_end").val();
@@ -1812,6 +2092,54 @@ jQuery(async () => {
   $("#image_text_start, #image_text_end").on("input", function() {
     extension_settings[extensionName].textStart = $("#image_text_start").val();
     extension_settings[extensionName].textEnd = $("#image_text_end").val();
+    saveSettingsDebounced();
+  });
+  $("#tts_add_skip_tag").on("click", function() {
+    addTagPairRow("skip");
+  });
+  $("#tts_add_read_tag").on("click", function() {
+    addTagPairRow("read");
+  });
+  $("#tts_enable_extra_text_rules").on("change", function() {
+    const enabled = $(this).prop("checked") === true;
+    extension_settings[extensionName].extraTextRulesEnabled = enabled;
+    updateExtraTextRulesUI(enabled);
+    saveSettingsDebounced();
+  });
+  $(document).on("input", ".tts-tag-start", function() {
+    const row = $(this).closest(".tts-tag-pair-row");
+    const endInput = row.find(".tts-tag-end");
+    const nextEnd = makeEndTagFromStart($(this).val());
+    const previousAutoEnd = row.attr("data-auto-end") || "";
+    if (!endInput.val().trim() || endInput.val().trim() === previousAutoEnd) {
+      endInput.val(nextEnd);
+      row.attr("data-auto-end", nextEnd);
+    }
+    updateTagPairPreview(row);
+    extension_settings[extensionName].skipTagPairs = collectTagPairSettings("skip");
+    extension_settings[extensionName].readTagPairs = collectTagPairSettings("read");
+    saveSettingsDebounced();
+  });
+  $(document).on("input", ".tts-tag-end", function() {
+    const row = $(this).closest(".tts-tag-pair-row");
+    updateTagPairPreview(row);
+    extension_settings[extensionName].skipTagPairs = collectTagPairSettings("skip");
+    extension_settings[extensionName].readTagPairs = collectTagPairSettings("read");
+    saveSettingsDebounced();
+  });
+  $(document).on("change", ".tts-tag-enabled", function() {
+    extension_settings[extensionName].skipTagPairs = collectTagPairSettings("skip");
+    extension_settings[extensionName].readTagPairs = collectTagPairSettings("read");
+    saveSettingsDebounced();
+  });
+  $(document).on("click", ".tts-tag-remove", function() {
+    $(this).closest(".tts-tag-pair-row").remove();
+    extension_settings[extensionName].skipTagPairs = collectTagPairSettings("skip");
+    extension_settings[extensionName].readTagPairs = collectTagPairSettings("read");
+    saveSettingsDebounced();
+  });
+  $("#tts_read_untagged_with_required").on("change", function() {
+    extension_settings[extensionName].readUntaggedWithRequired = $(this).prop("checked") === true;
     saveSettingsDebounced();
   });
   $("#test_siliconflow_connection").on("click", testConnection);

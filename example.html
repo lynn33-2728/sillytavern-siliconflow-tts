@@ -9,13 +9,13 @@
             <div class="sf-settings">
                 <section class="sf-section sf-progress-note">
                     <small>
-                        • 按住 ▶ 能拖动进度条位置。<br>
-                        • 轻点 ▶ 重听用缓存，不重复扣费。
+                        • 按住左侧 🔊 拖动进度条位置。<br>
+                        • ▶ 重听用缓存，不重复扣费。
                     </small>
                 </section>
 
                 <section class="sf-section">
-                    <h4> API设定</h4>
+                    <h4>1组 API设定</h4>
                     <div class="sf-help-line">从 <a href="https://siliconflow.cn" target="_blank">硅基流动官网</a> 获取API密钥</div>
                     <div class="sf-setting-row">
                         <label for="siliconflow_api_key">API密钥：</label>
@@ -33,7 +33,7 @@
                 </div>
 
                 <section class="sf-section">
-                    <h4>语音设定</h4>
+                    <h4>2组 语音设定</h4>
 
                     <div class="setting-item button-group sf-grid two sf-compact-grid">
                         <div class="setting-item">
@@ -72,10 +72,10 @@
 
                     <div class="setting-item button-group sf-checkbox-inline-row">
                         <label class="sf-checkbox-item">
-                            <input type="checkbox" id="auto_play_audio" checked /> 自动朗读角色消息
+                            <input type="checkbox" id="auto_play_audio" checked /><span>自动朗读角色消息</span>
                         </label>
                         <label class="sf-checkbox-item">
-                            <input type="checkbox" id="auto_play_user" /> 自动朗读用户消息
+                            <input type="checkbox" id="auto_play_user" /><span>自动朗读用户消息</span>
                         </label>
                     </div>
 
@@ -97,12 +97,46 @@
                             <label for="tts_max_read_chars">全文发送上限：</label>
                             <input type="number" id="tts_max_read_chars" min="0" step="1" placeholder="大于设定字数不发送，留空或0=不限制" />
                         </div>
-
                         <small>
                             多组标记时用空格隔开，如：开始填 <code>（ 【 "</code>，结束填 <code>） 】 "</code><br>
                             提取不到标记内容时，会自动改读整条消息，不会卡住。<br>
                             全文发送上限,建议填1500,留空或0=不限制。
                         </small>
+
+                        <div class="sf-extra-text-rules">
+                            <label class="setting-item button-group sf-checkbox-row sf-extra-rules-toggle">
+                                <input type="checkbox" id="tts_enable_extra_text_rules" />
+                                <strong>启用额外提取正文</strong>
+                            </label>
+
+                            <div class="sf-extra-text-rules-body" style="display:none;">
+                                <div class="sf-tag-rule-block sf-tag-rule-skip">
+                                    <div class="setting-item button-group sf-tag-rule-head">
+                                        <span class="tts-tag-status tts-tag-skip">×</span>
+                                        <strong>跳过这些标签块</strong>
+                                        <button type="button" id="tts_add_skip_tag" class="menu_button">+</button>
+                                    </div>
+                                    <div id="tts_skip_tag_pairs" class="sf-tag-pair-list"></div>
+                                    <small>例如填 <code>&lt;think&gt;</code>，会先删掉 <code>&lt;think&gt;...&lt;/think&gt;</code>，其余正文仍按上方符号规则朗读。</small>
+                                </div>
+
+                                <div class="sf-tag-rule-block sf-tag-rule-read">
+                                    <div class="setting-item button-group sf-tag-rule-head">
+                                        <span class="tts-tag-status tts-tag-read">✓</span>
+                                        <strong>只在这些标签块里提取</strong>
+                                        <button type="button" id="tts_add_read_tag" class="menu_button">+</button>
+                                    </div>
+                                    <div id="tts_read_tag_pairs" class="sf-tag-pair-list"></div>
+                                    <small>例如开始填 <code>&lt;content&gt;</code>，结束会自动同步为 <code>&lt;/content&gt;</code>。朗读时只在这些标签块里继续提取上方符号内容。</small>
+                                </div>
+
+                                <label class="setting-item button-group sf-checkbox-row">
+                                    <input type="checkbox" id="tts_read_untagged_with_required" />
+                                    <span>同时读取没有标签的内容</span>
+                                </label>
+                            </div>
+                        </div>
+
                     </div>
                 </section>
 
@@ -197,17 +231,58 @@
 
 /* 3. 让自动朗读的多选框左右并排（保持不变） */
 .sf-checkbox-inline-row {
-    display: flex;
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
     gap: 20px;
     margin: 15px 0;
 }
 .sf-checkbox-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 6px !important;
     cursor: pointer;
+    width: auto !important;
+    margin: 0 !important;
+    white-space: nowrap !important;
 }
 .sf-checkbox-item input[type="checkbox"] {
+    flex: 0 0 auto !important;
     margin: 0 !important;
+}
+.sf-checkbox-item span {
+    display: inline !important;
+    line-height: 1.2 !important;
+}
+.siliconflow-extension-settings input[type="checkbox"] {
+    width: 14px !important;
+    height: 14px !important;
+    margin: 0 4px 0 0 !important;
+}
+.siliconflow-extension-settings .sf-checkbox-row,
+.siliconflow-extension-settings .tts-tag-enabled-label {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    margin: 4px 0 6px !important;
+}
+.siliconflow-extension-settings .tts-tag-pair-row {
+    align-items: center !important;
+    gap: 6px !important;
+}
+.siliconflow-extension-settings .tts-tag-enabled-label {
+    flex: 0 0 auto !important;
+    min-width: auto !important;
+    white-space: nowrap !important;
+}
+.siliconflow-extension-settings input[type="text"],
+.siliconflow-extension-settings input[type="password"],
+.siliconflow-extension-settings input[type="number"],
+.siliconflow-extension-settings select,
+.siliconflow-extension-settings textarea {
+    background: rgba(18, 18, 18, 0.58) !important;
+    border: 1px solid rgba(255, 255, 255, 0.72) !important;
+    color: var(--SmartThemeBodyColor, #fff) !important;
 }
 </style>
