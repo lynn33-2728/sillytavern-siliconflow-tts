@@ -1531,7 +1531,7 @@ function prepareTextForTts(message) {
         if (marked) parts.push(marked);
       });
       if (includeUntagged) {
-        const outsideText = stripAllTagBlocks(working);
+        const outsideText = textOutsideRanges(working, readBlocks);
         const outsideMarked = extractMarkedText(outsideText);
         if (outsideMarked) parts.push(outsideMarked);
       }
