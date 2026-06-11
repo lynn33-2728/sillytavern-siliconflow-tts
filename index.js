@@ -1454,6 +1454,13 @@ function textOutsideRanges(message, ranges) {
     .trim();
 }
 
+function stripAllTagBlocks(message) {
+  return String(message || "")
+    .replace(/<([A-Za-z][\w:-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .trim();
+}
+
 function normalizeTtsWhitespace(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
@@ -1505,6 +1512,33 @@ function applyExtraTagExtraction(message) {
 }
 
 function prepareTextForTts(message) {
+  if (extension_settings[extensionName].extraTextRulesEnabled === true) {
+    const skipPairs = getEnabledTagPairs(extension_settings[extensionName].skipTagPairs);
+    const readPairs = getEnabledTagPairs(extension_settings[extensionName].readTagPairs);
+    const includeUntagged = extension_settings[extensionName].readUntaggedWithRequired === true;
+    let working = String(message || "");
+
+    const skipBlocks = findTagBlocks(working, skipPairs);
+    if (skipBlocks.length > 0) {
+      working = removeRanges(working, skipBlocks);
+    }
+
+    if (readPairs.length > 0) {
+      const readBlocks = findTagBlocks(working, readPairs);
+      const parts = [];
+      readBlocks.forEach(block => {
+        const marked = extractMarkedText(block.text);
+        if (marked) parts.push(marked);
+      });
+      if (includeUntagged) {
+        const outsideText = stripAllTagBlocks(working);
+        const outsideMarked = extractMarkedText(outsideText);
+        if (outsideMarked) parts.push(outsideMarked);
+      }
+      return normalizeTtsWhitespace(parts.join("，"));
+    }
+  }
+
   const filteredText = applyExtraTagExtraction(message);
   if (!filteredText) return "";
   const markedText = extractMarkedText(filteredText);
