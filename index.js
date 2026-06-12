@@ -29,8 +29,8 @@ function ttsLog(msg) {
     panel = document.createElement("div");
     panel.id = "tts-log-panel";
     panel.style.cssText =
-      "position:fixed;left:6px;right:6px;bottom:120px;z-index:100500;max-height:32vh;overflow-y:auto;" +
-      "background:rgba(0,0,0,0.88);color:#00ff7f;font-size:11px;line-height:1.5;padding:0;border-radius:8px;" +
+      "position:fixed;left:8px;top:8px;z-index:100500;width:min(300px,calc(100vw - 16px));max-width:calc(100vw - 16px);max-height:min(170px,32vh);overflow-y:auto;" +
+      "background:rgba(0,0,0,0.88);color:#00ff7f;font-size:10px;line-height:1.45;padding:0;border-radius:8px;" +
       "font-family:monospace;white-space:pre-wrap;display:none;box-shadow:0 2px 12px rgba(0,0,0,0.6);";
     const head = document.createElement("div");
     head.style.cssText = "position:sticky;top:0;background:#111;color:#fff;padding:4px 8px;display:flex;justify-content:space-between;align-items:center;border-radius:8px 8px 0 0;";
@@ -943,8 +943,15 @@ function getTtsAudioEl() {
         const hidden = (panel.style.display === "none" || !panel.style.display);
         if (hidden) {
           const rect = bar.getBoundingClientRect();
-          const bottom = Math.max(8, window.innerHeight - rect.top + 10);
-          panel.style.bottom = `${bottom}px`;
+          panel.style.display = "block";
+          const panelRect = panel.getBoundingClientRect();
+          const gap = 8;
+          const left = Math.max(gap, Math.min(rect.left, window.innerWidth - panelRect.width - gap));
+          let top = rect.top - panelRect.height - gap;
+          if (top < gap) top = Math.min(rect.bottom + gap, window.innerHeight - panelRect.height - gap);
+          panel.style.left = `${left}px`;
+          panel.style.top = `${Math.max(gap, top)}px`;
+          panel.style.bottom = "auto";
           panel.style.zIndex = "100500";
         }
         panel.style.display = hidden ? "block" : "none";
@@ -1449,7 +1456,6 @@ function removeRanges(message, ranges) {
 
 function textOutsideRanges(message, ranges) {
   return removeRanges(message, ranges)
-    .replace(/<([A-Za-z][\w:-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g, " ")
     .replace(/<[^>]+>/g, " ")
     .trim();
 }
@@ -1459,6 +1465,20 @@ function stripAllTagBlocks(message) {
     .replace(/<([A-Za-z][\w:-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g, " ")
     .replace(/<[^>]+>/g, " ")
     .trim();
+}
+
+function getAllConfiguredTagBlocks(message) {
+  const allPairs = [
+    ...(extension_settings[extensionName].skipTagPairs || []),
+    ...(extension_settings[extensionName].readTagPairs || []),
+  ].filter(pair => pair?.start && pair?.end);
+  return findTagBlocks(message, allPairs);
+}
+
+function getConfiguredReadTagBlocks(message) {
+  const readPairs = (extension_settings[extensionName].readTagPairs || [])
+    .filter(pair => pair?.start && pair?.end);
+  return findTagBlocks(message, readPairs);
 }
 
 function normalizeTtsWhitespace(text) {
@@ -1484,33 +1504,6 @@ function getMessageSourceText(messageElement) {
   return text;
 }
 
-function applyExtraTagExtraction(message) {
-  if (extension_settings[extensionName].extraTextRulesEnabled !== true) {
-    return normalizeTtsWhitespace(message);
-  }
-  const skipPairs = getEnabledTagPairs(extension_settings[extensionName].skipTagPairs);
-  const readPairs = getEnabledTagPairs(extension_settings[extensionName].readTagPairs);
-  const includeUntagged = extension_settings[extensionName].readUntaggedWithRequired === true;
-  let working = String(message || "");
-
-  const skipBlocks = findTagBlocks(working, skipPairs);
-  if (skipBlocks.length > 0) {
-    working = removeRanges(working, skipBlocks);
-  }
-
-  if (readPairs.length === 0) {
-    return normalizeTtsWhitespace(working);
-  }
-
-  const readBlocks = findTagBlocks(working, readPairs);
-  const parts = readBlocks.map(block => block.text).filter(Boolean);
-  if (includeUntagged) {
-    const outsideText = textOutsideRanges(working, readBlocks);
-    if (outsideText) parts.push(outsideText);
-  }
-  return normalizeTtsWhitespace(parts.join(" "));
-}
-
 function prepareTextForTts(message) {
   if (extension_settings[extensionName].extraTextRulesEnabled === true) {
     const skipPairs = getEnabledTagPairs(extension_settings[extensionName].skipTagPairs);
@@ -1523,29 +1516,41 @@ function prepareTextForTts(message) {
       working = removeRanges(working, skipBlocks);
     }
 
+    const parts = [];
+
+    let readBlocks = [];
     if (readPairs.length > 0) {
-      const readBlocks = findTagBlocks(working, readPairs);
-      const parts = [];
+      readBlocks = findTagBlocks(working, readPairs);
       readBlocks.forEach(block => {
         const marked = extractMarkedText(block.text);
         if (marked) parts.push(marked);
       });
-      if (includeUntagged) {
-        const outsideText = textOutsideRanges(working, readBlocks);
-        const outsideMarked = extractMarkedText(outsideText);
-        if (outsideMarked) parts.push(outsideMarked);
-      }
+    }
+
+    if (includeUntagged && readPairs.length > 0) {
+      const outsideText = textOutsideRanges(working, readBlocks);
+      const outsideMarked = extractMarkedText(outsideText);
+      if (outsideMarked) parts.push(outsideMarked);
+    }
+
+    if (parts.length > 0) {
       return normalizeTtsWhitespace(parts.join("，"));
     }
+
+    if (readPairs.length === 0) {
+      const configuredReadBlocks = getConfiguredReadTagBlocks(working);
+      const ordinaryText = includeUntagged ? removeRanges(working, configuredReadBlocks) : working;
+      const markedText = extractMarkedText(ordinaryText);
+      return normalizeTtsWhitespace(markedText || ordinaryText);
+    }
+
+    return "";
   }
 
-  const filteredText = applyExtraTagExtraction(message);
-  if (!filteredText) return "";
-  const markedText = extractMarkedText(filteredText);
-  if (extension_settings[extensionName].extraTextRulesEnabled === true && getEnabledTagPairs(extension_settings[extensionName].readTagPairs).length > 0) {
-    return normalizeTtsWhitespace(markedText);
-  }
-  return normalizeTtsWhitespace(markedText || filteredText);
+  const fullText = normalizeTtsWhitespace(message);
+  if (!fullText) return "";
+  const markedText = extractMarkedText(fullText);
+  return normalizeTtsWhitespace(markedText || fullText);
 }
 
 function extractMarkedText(message) {

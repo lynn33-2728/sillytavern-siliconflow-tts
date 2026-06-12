@@ -37,13 +37,13 @@
 推荐在 SillyTavern 的扩展页面用仓库地址安装：
 
 ```text
-https://github.com/lynn33-2728/ST-siliconflow-tts
+https://github.com/lynn33-2728/sillytavern-siliconflow-tts
 ```
 
 也可以手动把本仓库放到 SillyTavern 的第三方扩展目录：
 
 ```text
-SillyTavern/data/default-user/extensions/ST-siliconflow-tts
+SillyTavern/data/default-user/extensions/sillytavern-siliconflow-tts
 ```
 
 然后刷新 SillyTavern 页面，在扩展设置里配置 SiliconFlow API。

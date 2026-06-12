@@ -94,6 +94,43 @@
 
                     <div class="sf-subsection">
                         <h4>文本截取设置</h4>
+                        <div class="sf-extra-text-rules">
+                            <label class="setting-item button-group sf-checkbox-row sf-extra-rules-toggle">
+                                <input type="checkbox" id="tts_enable_extra_text_rules" />
+                                <strong>使用标签块-额外提取正文</strong>
+                            </label>
+
+                            <div class="sf-extra-text-rules-body" style="display:none;">
+                                <small>
+                                    处理顺序：先删掉 <code>X不想读</code>，再读取 <code>✓只读范围</code>；勾选<code>包括没有标签的内容</code>时，会额外读取标签外正文。最后再按下面开始/结束标记提取。
+                                </small>
+
+                                <div class="sf-tag-rule-block sf-tag-rule-skip">
+                                    <div class="setting-item button-group sf-tag-rule-head">
+                                        <span class="tts-tag-status tts-tag-skip">×</span>
+                                        <strong>X不想读</strong>
+                                        <button type="button" id="tts_add_skip_tag" class="menu_button">+</button>
+                                        <small>例如填思维链的 <code>&lt;think&gt;</code>，会先删掉 <code>&lt;think&gt;...&lt;/think&gt;</code>，里面内容不会再提取。</small>
+                                    </div>
+                                    <div id="tts_skip_tag_pairs" class="sf-tag-pair-list"></div>
+                                </div>
+
+                                <div class="sf-tag-rule-block sf-tag-rule-read">
+                                    <div class="setting-item button-group sf-tag-rule-head">
+                                        <span class="tts-tag-status tts-tag-read">✓</span>
+                                        <strong>只读范围</strong>
+                                        <button type="button" id="tts_add_read_tag" class="menu_button">+</button>
+                                        <small>霸王条款，全文只读这里，例如开始填 <code>&lt;content&gt;</code>，结束会自动同步为 <code>&lt;/content&gt;</code>。适合正文固定放在标签里的卡。</small>
+                                    </div>
+                                    <label class="setting-item button-group sf-checkbox-row sf-include-untagged-row">
+                                        <input type="checkbox" id="tts_read_untagged_with_required" />
+                                        <span>包括没有标签的内容</span>
+                                    </label>
+                                    <div id="tts_read_tag_pairs" class="sf-tag-pair-list"></div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="setting-item button-group sf-grid two sf-compact-grid">
                             <div class="setting-item">
                                 <label for="image_text_start">开始标记</label>
@@ -115,40 +152,6 @@
                             提取不到标记内容时，会自动改读整条消息，不会卡住。<br>
                             全文发送上限,建议填1500,留空或0=不限制。
                         </small>
-
-                        <div class="sf-extra-text-rules">
-                            <label class="setting-item button-group sf-checkbox-row sf-extra-rules-toggle">
-                                <input type="checkbox" id="tts_enable_extra_text_rules" />
-                                <strong>启用额外提取正文</strong>
-                            </label>
-
-                            <div class="sf-extra-text-rules-body" style="display:none;">
-                                <div class="sf-tag-rule-block sf-tag-rule-skip">
-                                    <div class="setting-item button-group sf-tag-rule-head">
-                                        <span class="tts-tag-status tts-tag-skip">×</span>
-                                        <strong>跳过这些标签块</strong>
-                                        <button type="button" id="tts_add_skip_tag" class="menu_button">+</button>
-                                    </div>
-                                    <div id="tts_skip_tag_pairs" class="sf-tag-pair-list"></div>
-                                    <small>例如填 <code>&lt;think&gt;</code>，会先删掉 <code>&lt;think&gt;...&lt;/think&gt;</code>，其余正文仍按上方符号规则朗读。</small>
-                                </div>
-
-                                <div class="sf-tag-rule-block sf-tag-rule-read">
-                                    <div class="setting-item button-group sf-tag-rule-head">
-                                        <span class="tts-tag-status tts-tag-read">✓</span>
-                                        <strong>只在这些标签块里提取</strong>
-                                        <button type="button" id="tts_add_read_tag" class="menu_button">+</button>
-                                    </div>
-                                    <div id="tts_read_tag_pairs" class="sf-tag-pair-list"></div>
-                                    <small>例如开始填 <code>&lt;content&gt;</code>，结束会自动同步为 <code>&lt;/content&gt;</code>。朗读时只在这些标签块里继续提取上方符号内容。</small>
-                                </div>
-
-                                <label class="setting-item button-group sf-checkbox-row">
-                                    <input type="checkbox" id="tts_read_untagged_with_required" />
-                                    <span>同时读取没有标签的内容</span>
-                                </label>
-                            </div>
-                        </div>
 
                     </div>
                 </section>
@@ -283,6 +286,22 @@
 .siliconflow-extension-settings .tts-tag-pair-row {
     align-items: center !important;
     gap: 6px !important;
+}
+.siliconflow-extension-settings .sf-tag-rule-head {
+    align-items: center !important;
+    flex-wrap: wrap !important;
+}
+.siliconflow-extension-settings .sf-inline-mini-check {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    margin: 0 0 0 4px !important;
+    width: auto !important;
+    white-space: nowrap;
+}
+.siliconflow-extension-settings .sf-inline-mini-check input[type="checkbox"] {
+    flex: 0 0 auto !important;
+    margin: 0 !important;
 }
 .siliconflow-extension-settings .tts-tag-enabled-label {
     flex: 0 0 auto !important;
